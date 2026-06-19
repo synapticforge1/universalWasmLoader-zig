@@ -31,6 +31,8 @@ Working tree:
   `math_50.wit` are the reference fixture.
 - `build.zig` — compiles the C loader, links wasmtime, stages `wasmtime.dll`, defines `run` step.
 - `scripts/fetch-wasmtime.sh` — downloads the wasmtime C API SDK into `vendor/` (gitignored).
+- `scripts/bump-version.sh` / `release.sh` / `publish.sh` — the release toolchain (see
+  "Release / publish flow" below).
 - `vendor/` — wasmtime C API SDK (headers + `libwasmtime.dll.a` + `wasmtime.dll`). **gitignored**;
   fetched on demand.
 - `LICENSE` — MIT (Copyright (c) 2026 Jon Marcum), identical to the `-c` port. Listed in
@@ -89,6 +91,32 @@ stack `[N]uwl_val_t`. The C loader re-narrows each value to the export's actual 
   square(5) = 25
   ```
   **Verified 2026-06-19** (Zig 0.16.0) — matches the README.
+
+## Release / publish flow (AUTHORED 2026-06-19)
+
+The version in `build.zig.zon` (`.version`) is the **single source of truth**. Three scripts, run in
+order, keep the git tag, GitHub release, and Zigistry listing consistent with it:
+
+1. **`scripts/bump-version.sh <major|minor|patch|X.Y.Z>`** — rewrites `.version` in `build.zig.zon`
+   and commits the isolated bump. Guards: clean tree, strictly-greater target, no pre-existing tag,
+   valid semver. `--dry-run` / `--no-commit`.
+2. **`scripts/release.sh`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`,
+   tags `v<version>`, pushes branch + tag to `origin`, and creates the matching **GitHub Release** via
+   `gh` (skippable). Idempotent (reuses a tag only if it points at HEAD; skips an existing Release;
+   degrades if `gh` is unauthenticated). Does **not** touch Zigistry. `--dry-run` / `--no-release` /
+   `--no-build` / `--remote`.
+3. **`scripts/publish.sh`** — the deliberate Zigistry step, decoupled from `release.sh`. **Zigistry has
+   no upload/CLI publish** ([help](https://zigistry.dev/help/)): a library is indexed by giving the
+   GitHub repo the topic **`zig-package`** (a program would use `Zig`), after which it (re)indexes on
+   the next push, typically within a day. The script verifies the `v<version>` tag exists locally + on
+   `origin`, requires an authenticated `gh`, is **idempotent** (no-op if the topic is already set),
+   prompts before changing public repo metadata (`--yes` to skip), then runs `gh repo edit --add-topic
+   zig-package`. `--dry-run` / `--allow-dirty` / `--skip-tag-check` / `--remote` / `--topic`.
+
+**v1.0.0 status (2026-06-19):** committed + tagged `v1.0.0`; `main` and the tag are pushed to `origin`
+(tag commit `89a6d97`). The **GitHub Release** and the **Zigistry topic** were left to the owner to do
+once `gh` is authenticated (`gh` was unauthenticated on the build host). Zigistry needs only the topic
++ a push; the GitHub Release is optional polish.
 
 ## Known gaps / not yet done
 
