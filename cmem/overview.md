@@ -117,10 +117,14 @@ Bash-only (one-time dev setup).
    prompts before changing public repo metadata (`--yes` to skip), then runs `gh repo edit --add-topic
    zig-package`. `--dry-run` / `--allow-dirty` / `--skip-tag-check` / `--remote` / `--topic`.
 
-**v1.0.0 status (2026-06-19):** committed + tagged `v1.0.0`; `main` and the tag are pushed to `origin`
-(tag commit `89a6d97`). The **GitHub Release** and the **Zigistry topic** were left to the owner to do
-once `gh` is authenticated (`gh` was unauthenticated on the build host). Zigistry needs only the topic
-+ a push; the GitHub Release is optional polish.
+**v1.0.0 status (2026-06-19):** tagged `v1.0.0` at commit `89a6d97` (the working library: loader
+binding + LICENSE + cmem) and pushed to `origin`. `main` has since advanced and is pushed (currently
+`7ecc7a6`) with the full release toolchain — `bump-version`/`release`/`publish` in both `.sh` and
+`.nu` forms. The tag was intentionally **not** moved onto the tooling commits: scripts/cmem aren't part
+of the published package surface, so `v1.0.0` still marks the library state. The **GitHub Release** and
+the **Zigistry topic** remain for the owner to do once `gh` is authenticated (`gh` was unauthenticated
+on the build host). Zigistry needs only the topic + a push; the GitHub Release is optional polish. Next
+real version: `bump-version` → `release` (→ `publish`) will tag at HEAD including the tooling.
 
 ## Known gaps / not yet done
 
