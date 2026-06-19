@@ -31,8 +31,8 @@ Working tree:
   `math_50.wit` are the reference fixture.
 - `build.zig` — compiles the C loader, links wasmtime, stages `wasmtime.dll`, defines `run` step.
 - `scripts/fetch-wasmtime.sh` — downloads the wasmtime C API SDK into `vendor/` (gitignored).
-- `scripts/bump-version.sh` / `release.sh` / `publish.sh` — the release toolchain (see
-  "Release / publish flow" below).
+- `scripts/bump-version.{sh,nu}` / `release.{sh,nu}` / `publish.{sh,nu}` — the release toolchain, in
+  Bash and equivalent cross-platform Nushell forms (see "Release / publish flow" below).
 - `vendor/` — wasmtime C API SDK (headers + `libwasmtime.dll.a` + `wasmtime.dll`). **gitignored**;
   fetched on demand.
 - `LICENSE` — MIT (Copyright (c) 2026 Jon Marcum), identical to the `-c` port. Listed in
@@ -95,7 +95,11 @@ stack `[N]uwl_val_t`. The C loader re-narrows each value to the export's actual 
 ## Release / publish flow (AUTHORED 2026-06-19)
 
 The version in `build.zig.zon` (`.version`) is the **single source of truth**. Three scripts, run in
-order, keep the git tag, GitHub release, and Zigistry listing consistent with it:
+order, keep the git tag, GitHub release, and Zigistry listing consistent with it. Each ships in **two
+equivalent forms** (same flags/guards/behavior): a Bash `.sh` and a cross-platform Nushell `.nu`
+(added 2026-06-19, needs `nu` ≥0.113; runs on Windows/macOS/Linux without Git Bash). Use whichever the
+machine has — e.g. `nu scripts/release.nu` or `bash scripts/release.sh`. `fetch-wasmtime.sh` stays
+Bash-only (one-time dev setup).
 
 1. **`scripts/bump-version.sh <major|minor|patch|X.Y.Z>`** — rewrites `.version` in `build.zig.zon`
    and commits the isolated bump. Guards: clean tree, strictly-greater target, no pre-existing tag,
