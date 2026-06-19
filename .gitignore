@@ -1,0 +1,10 @@
+# wasmtime C API SDK — fetched on demand, not committed
+/vendor/
+
+# wasmtime.dll staged at the repo root by `zig build run`
+/wasmtime.dll
+
+# Zig build artifacts
+.zig-cache/
+zig-cache/
+zig-out/
