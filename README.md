@@ -77,4 +77,4 @@ Zig's `lld` does not provide. `zig build` ships `wasmtime.dll` next to the binar
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).
