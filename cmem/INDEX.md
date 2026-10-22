@@ -32,4 +32,4 @@ the expected adder output.
 
 | File | What it holds |
 | --- | --- |
-| [overview.md](overview.md) | What this Zig port is, its language/runtime, API surface, how it links the C loader + wasmtime, build/run flow, and known gaps |
+| [overview.md](overview.md) | What this Zig port is, its language/runtime, repo hosting (`synapticforge1` org since 2026-10-21; JSR stays `@jrmarcum`), API surface, how it links the C loader + wasmtime, build/run flow, and known gaps (incl. the exFAT git-pack fix, `maintenance.strategy gc`, applied 2026-10-21) |

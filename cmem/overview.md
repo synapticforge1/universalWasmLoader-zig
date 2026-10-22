@@ -4,7 +4,7 @@
 
 `universalWasmLoader-zig` is the **idiomatic Zig binding** of the Universal WASM Loader family. It is
 a thin, zero-duplication wrapper over the C single-header loader
-([`universalWasmLoader-c`](https://github.com/jrmarcum/universalWasmLoader-c)) — the Zig sibling of
+([`universalWasmLoader-c`](https://github.com/synapticforge1/universalWasmLoader-c)) — the Zig sibling of
 the reference JS loader [`@jrmarcum/universal-wasm-loader`](https://jsr.io/@jrmarcum/universal-wasm-loader).
 The hard parts (WIT parsing, Canonical ABI marshalling, `cabi_post` string returns, version pinning)
 live **once** in the C loader; this repo only adds a Zig-native call surface on top.
@@ -16,6 +16,22 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
 - **Distribution:** a Zig module (`build.zig.zon` name `universal_wasm_loader`, v1.0.0, MIT) exposing
   the importable module `uwl` (`b.addModule("uwl", ...)`). The MIT `LICENSE` file is listed in the
   manifest `paths`, so it ships with the published package.
+
+## Repository / hosting (moved 2026-10-21)
+
+- **Home:** [`synapticforge1/universalWasmLoader-zig`](https://github.com/synapticforge1/universalWasmLoader-zig)
+  — a GitHub organization owned by the owner. Transferred from the personal account `jrmarcum`;
+  GitHub redirects the old `jrmarcum/...` URLs (web + git). The upstream C loader moved with it:
+  [`synapticforge1/universalWasmLoader-c`](https://github.com/synapticforge1/universalWasmLoader-c).
+- **Not moved:** the JSR package is still `@jrmarcum/universal-wasm-loader` (JSR scopes are separate
+  from GitHub; `@synapticforge1/...` does not exist as of 2026-10-21). Keep JSR links as `@jrmarcum`.
+- **Local clone:** `origin` was repointed to
+  `https://github.com/synapticforge1/universalWasmLoader-zig.git` on 2026-10-21 (owner's machine).
+  Other clones still on the old `jrmarcum/...` URL keep working via redirect; repoint them with
+  `git remote set-url origin <new url>`.
+- **Release scripts are owner-agnostic** — `release`/`publish` use `origin` and `gh` against the
+  current repo, so nothing in them hard-codes the owner. The Zigistry `zig-package` topic/listing
+  follows the repo to its new owner path.
 
 ## Current state — IMPLEMENTED v1 (2026-06-19)
 
@@ -117,14 +133,17 @@ Bash-only (one-time dev setup).
    prompts before changing public repo metadata (`--yes` to skip), then runs `gh repo edit --add-topic
    zig-package`. `--dry-run` / `--allow-dirty` / `--skip-tag-check` / `--remote` / `--topic`.
 
-**v1.0.0 status (2026-06-19):** tagged `v1.0.0` at commit `89a6d97` (the working library: loader
-binding + LICENSE + cmem) and pushed to `origin`. `main` has since advanced and is pushed (currently
-`7ecc7a6`) with the full release toolchain — `bump-version`/`release`/`publish` in both `.sh` and
-`.nu` forms. The tag was intentionally **not** moved onto the tooling commits: scripts/cmem aren't part
-of the published package surface, so `v1.0.0` still marks the library state. The **GitHub Release** and
-the **Zigistry topic** remain for the owner to do once `gh` is authenticated (`gh` was unauthenticated
-on the build host). Zigistry needs only the topic + a push; the GitHub Release is optional polish. Next
-real version: `bump-version` → `release` (→ `publish`) will tag at HEAD including the tooling.
+**v1.0.0 status (re-verified 2026-10-21 against `origin`):** `v1.0.0` is an **annotated** tag — tag
+object `89a6d97`, pointing at **commit `07d954a`** ("Add scripts/bump-version.sh"). (Earlier memory
+called `89a6d97` the tagged commit; that hash is the tag object. Resolve with
+`git rev-parse 'v1.0.0^{commit}'`.) So the tagged tree is the working library + LICENSE + cmem plus
+`fetch-wasmtime.sh`, `bump-version.sh` and `release.sh` — but not `publish.sh` or the `.nu` ports.
+`main` has advanced past it (`985cb5e` on `origin` before the 2026-10-21 commit) with `publish` and
+the Nushell forms. The tag was intentionally **not** moved: scripts/cmem aren't part of the published
+package surface, so `v1.0.0` still marks the library state. The **GitHub Release** and the **Zigistry
+topic** remain for the owner to do once `gh` is authenticated (`gh` is installed but unauthenticated
+on the build host, re-checked 2026-10-21). Zigistry needs only the topic + a push; the GitHub Release is
+optional polish. Next real version: `bump-version` → `release` (→ `publish`) will tag at HEAD.
 
 ## Known gaps / not yet done
 
@@ -134,6 +153,16 @@ real version: `bump-version` → `release` (→ `publish`) will tag at HEAD incl
   Zig's build runner fails a **warm-cache** build with a bare `error: Unexpected`. Workaround:
   `rm -rf .zig-cache` before building (cold-cache is reliable), or build on an NTFS volume. Reproduced
   2026-06-19.
+- **Git pack growth on non-NTFS volumes (APPLIED 2026-10-21, same fix as binaryang 2026-09-16):** on a
+  volume that records no ownership (exFAT), git 2.54's per-commit auto-maintenance runs the
+  *geometric* strategy detached; its `multi-pack-index` rewrite races the editor's git integration,
+  fails, and leaves rolled-up packs behind (`renaming pack … failed: File exists` /
+  `geometric-repack failed`), so `.git` grows every commit. Durable fix: `git gc --prune=now`, then
+  **`git config --local maintenance.strategy gc`** (maintenance becomes `gc --auto`, which never
+  writes a MIDX). Applied here pre-emptively — the repo was still healthy (1 pack, no MIDX); after:
+  1 pack / 44 KiB, `fsck --connectivity-only` clean. It lives in `.git/config`, so **a fresh clone
+  needs it again**. Health check: `git count-objects -vH` — more than a handful of `packs:` means it
+  is recurring.
 - **Host import callbacks** are not surfaced in the Zig API — `import` passes `null, 0` for callbacks.
   Pure-compute / partial-import modules work; modules needing host imports must use the raw `uwl.c`
   layer.

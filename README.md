@@ -1,6 +1,6 @@
 # universalWasmLoader-zig
 
-Idiomatic **Zig** binding for the [Universal WASM Loader](https://github.com/jrmarcum/universalWasmLoader-c).
+Idiomatic **Zig** binding for the [Universal WASM Loader](https://github.com/synapticforge1/universalWasmLoader-c).
 It wraps the C single-header loader so you call `.wasm` exports with native Zig
 values and error unions — the Zig sibling of the reference JS loader
 [`@jrmarcum/universal-wasm-loader`](https://jsr.io/@jrmarcum/universal-wasm-loader).
@@ -68,7 +68,7 @@ Zig's `lld` does not provide. `zig build` ships `wasmtime.dll` next to the binar
 
 - **Zig 0.16+**, and a vendored wasmtime SDK (via `scripts/fetch-wasmtime.sh`).
 - The vendored C loader header lives at `src/universal_wasm_loader.h`; keep it in
-  sync with the upstream [`universalWasmLoader-c`](https://github.com/jrmarcum/universalWasmLoader-c)
+  sync with the upstream [`universalWasmLoader-c`](https://github.com/synapticforge1/universalWasmLoader-c)
   release you target.
 - **Filesystem caveat:** on some non-NTFS volumes (e.g. drives that "do not
   record ownership"), Zig's build runner can fail a *warm-cache* build with a
