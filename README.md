@@ -31,8 +31,8 @@ pass plain Zig values. A companion `.wit` next to the `.wasm` is required.
 ## Build & run
 
 ```sh
-scripts/fetch-wasmtime.sh     # downloads the wasmtime C API SDK into vendor/ (gitignored)
-zig build run                 # builds and runs examples/adder.zig
+bun scripts/fetch-wasmtime.ts   # downloads the wasmtime C API SDK into vendor/ (gitignored)
+zig build run                   # builds and runs examples/adder.zig
 ```
 
 `zig build run` prints:
@@ -66,7 +66,8 @@ Zig's `lld` does not provide. `zig build` ships `wasmtime.dll` next to the binar
 
 ## Requirements & notes
 
-- **Zig 0.16+**, and a vendored wasmtime SDK (via `scripts/fetch-wasmtime.sh`).
+- **Zig 0.16+**, and a vendored wasmtime SDK (via `bun scripts/fetch-wasmtime.ts`;
+  the repo's scripts need only [Bun](https://bun.sh)).
 - The vendored C loader header lives at `src/universal_wasm_loader.h`; keep it in
   sync with the upstream [`universalWasmLoader-c`](https://github.com/synapticforge1/universalWasmLoader-c)
   release you target.

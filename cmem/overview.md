@@ -46,9 +46,19 @@ Working tree:
 - `examples/adder.zig` — the runnable example (`zig build run`). `examples/math_50.wasm` +
   `math_50.wit` are the reference fixture.
 - `build.zig` — compiles the C loader, links wasmtime, stages `wasmtime.dll`, defines `run` step.
-- `scripts/fetch-wasmtime.sh` — downloads the wasmtime C API SDK into `vendor/` (gitignored).
-- `scripts/bump-version.{sh,nu}` / `release.{sh,nu}` / `publish.{sh,nu}` — the release toolchain, in
-  Bash and equivalent cross-platform Nushell forms (see "Release / publish flow" below).
+- `scripts/*.ts` — **all tooling, Bun + TypeScript only** ([INDEX.md](INDEX.md) § "Scripting rule"),
+  run as `bun scripts/<name>.ts`; no `package.json`, no dependencies (Bun globals + `node:` built-ins).
+  - `fetch-wasmtime.ts` — downloads the wasmtime C API SDK into `vendor/` (gitignored).
+  - `bump-version.ts` / `release.ts` / `publish.ts` — the release toolchain (see "Release / publish
+    flow" below).
+  - `_lib.ts` — shared helpers (repo root, `exec`/`capture`/dry-run `runner`, `.version` read, git
+    checks); not runnable on its own.
+- **Migration record (2026-10-21):** the four Bash scripts and three Nushell twins were ported 1:1
+  (same args, flags, guards, messages, exit codes 1/2) and deleted. Verified in a scratch clone on
+  `C:`: `bump-version patch` committed a correct `.version` bump; `release --dry-run --no-build`
+  printed tag/push/`gh release` plan and refused a tag not at HEAD; `publish --dry-run` downgraded
+  guards to warnings; `fetch-wasmtime.ts` downloaded + extracted v45.0.2 and `zig build run` against
+  it printed the expected adder output. The repo never had Deno scripts or config.
 - `vendor/` — wasmtime C API SDK (headers + `libwasmtime.dll.a` + `wasmtime.dll`). **gitignored**;
   fetched on demand.
 - `LICENSE` — MIT (Copyright (c) 2026 Jon Marcum), identical to the `-c` port. Listed in
@@ -99,33 +109,42 @@ stack `[N]uwl_val_t`. The C loader re-narrows each value to the export's actual 
 
 ## Build / run flow
 
-- `scripts/fetch-wasmtime.sh` — fetch the wasmtime C API SDK into `vendor/` (needs `curl`, `unzip`).
+- `bun scripts/fetch-wasmtime.ts [VERSION] [PLATFORM]` — fetch the wasmtime C API SDK into
+  `vendor/`. Needs only Bun: `fetch()` downloads (3 retries) and an in-process zip reader (central
+  directory; stored + deflate; no ZIP64; rejects paths escaping `vendor/`) extracts — chosen over
+  shelling out because Windows has no `unzip` and `tar -C C:\…` misreads the drive letter (binaryang
+  trap). Skips if `vendor/<name>/include` exists. The full zip has 232 files (incl. the static `.a`
+  and a `min/` variant); a trimmed 114-file `vendor/` is what this machine had — all 114 byte-identical.
 - `zig build run` — builds + runs `examples/adder.zig`. Expected output:
   ```
   adder(3, 4) = 7
   multiply(2.5, 4.0) = 10
   square(5) = 25
   ```
-  **Verified 2026-06-19** (Zig 0.16.0) — matches the README.
+  **Verified 2026-06-19** (Zig 0.16.0) — matches the README. **Re-verified 2026-10-21** in a scratch
+  clone on `C:` against an SDK freshly fetched by `fetch-wasmtime.ts`.
+- **Testing scripts without touching the repo:** clone into the session scratchpad on `C:` (NTFS) and
+  run there. Two flags are needed on this machine: `git -c safe.directory=* -c core.longpaths=true
+  clone -c core.longpaths=true <abs repo path> <dir>` — a `./` source path misses the `safe.directory`
+  entry, and the scratchpad path is long enough to hit `Filename too long`. PowerShell 5.1's
+  `Get-FileHash` also fails on those long paths; compare trees with a Bun script instead.
 
 ## Release / publish flow (AUTHORED 2026-06-19)
 
 The version in `build.zig.zon` (`.version`) is the **single source of truth**. Three scripts, run in
-order, keep the git tag, GitHub release, and Zigistry listing consistent with it. Each ships in **two
-equivalent forms** (same flags/guards/behavior): a Bash `.sh` and a cross-platform Nushell `.nu`
-(added 2026-06-19, needs `nu` ≥0.113; runs on Windows/macOS/Linux without Git Bash). Use whichever the
-machine has — e.g. `nu scripts/release.nu` or `bash scripts/release.sh`. `fetch-wasmtime.sh` stays
-Bash-only (one-time dev setup).
+order, keep the git tag, GitHub release, and Zigistry listing consistent with it. All are Bun +
+TypeScript (`bun scripts/<name>.ts`, cross-platform; since 2026-10-21 — they replaced the 2026-06-19
+Bash `.sh` + Nushell `.nu` pairs). `-h`/`--help` prints each one's usage.
 
-1. **`scripts/bump-version.sh <major|minor|patch|X.Y.Z>`** — rewrites `.version` in `build.zig.zon`
+1. **`scripts/bump-version.ts <major|minor|patch|X.Y.Z>`** — rewrites `.version` in `build.zig.zon`
    and commits the isolated bump. Guards: clean tree, strictly-greater target, no pre-existing tag,
    valid semver. `--dry-run` / `--no-commit`.
-2. **`scripts/release.sh`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`,
+2. **`scripts/release.ts`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`,
    tags `v<version>`, pushes branch + tag to `origin`, and creates the matching **GitHub Release** via
    `gh` (skippable). Idempotent (reuses a tag only if it points at HEAD; skips an existing Release;
    degrades if `gh` is unauthenticated). Does **not** touch Zigistry. `--dry-run` / `--no-release` /
    `--no-build` / `--remote`.
-3. **`scripts/publish.sh`** — the deliberate Zigistry step, decoupled from `release.sh`. **Zigistry has
+3. **`scripts/publish.ts`** — the deliberate Zigistry step, decoupled from `release.ts`. **Zigistry has
    no upload/CLI publish** ([help](https://zigistry.dev/help/)): a library is indexed by giving the
    GitHub repo the topic **`zig-package`** (a program would use `Zig`), after which it (re)indexes on
    the next push, typically within a day. The script verifies the `v<version>` tag exists locally + on

@@ -1,7 +1,7 @@
 const std = @import("std");
 
 // Location of the wasmtime C API SDK inside this package (see
-// scripts/fetch-wasmtime.sh). Only the shared bits are needed:
+// scripts/fetch-wasmtime.ts). Only the shared bits are needed:
 // include/, lib/libwasmtime.dll.a, lib/wasmtime.dll.
 const wasmtime_dir = "vendor/wasmtime-v45.0.2-x86_64-mingw-c-api";
 

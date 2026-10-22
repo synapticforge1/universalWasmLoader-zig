@@ -23,5 +23,6 @@ docs and [`cmem/overview.md`](cmem/overview.md) for the project memory.
 - `src/uwl_impl.c` + `src/universal_wasm_loader.h` — vendored C loader compiled into the module.
 - `build.zig` — compiles the loader, links the wasmtime **import** library (not the static archive),
   stages `wasmtime.dll`, defines the `run` step.
-- `scripts/fetch-wasmtime.sh` — fetches the wasmtime C API SDK into `vendor/` (gitignored).
+- `scripts/*.ts` — all tooling is Bun + TypeScript only (`bun scripts/<name>.ts`); no shell scripts.
+  `fetch-wasmtime.ts` fetches the wasmtime C API SDK into `vendor/` (gitignored).
 - `zig build run` — builds + runs `examples/adder.zig`.

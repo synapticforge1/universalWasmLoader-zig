@@ -13,6 +13,13 @@ single-topic.
 - **`README` is NOT project memory.** It is the public, user-facing doc. Keep internal decision logs /
   bug post-mortems out of it — those live here in `cmem/`.
 
+### Scripting rule — Bun + TypeScript only (owner, 2026-10-21; binding on every agent)
+Every script in this project — repo tooling under `scripts/` and any throwaway/session script — is a
+**TypeScript file run by Bun** (`bun scripts/<name>.ts`). No Deno (it is being retired across the
+workspace), no Bash/`.sh`, no Nushell/`.nu`, no Python, no PowerShell scripts. The Zig build itself
+(`build.zig`) is not a script and stays Zig. The former `.sh`/`.nu` toolchain was ported to
+`scripts/*.ts` and deleted on 2026-10-21 — see [overview.md](overview.md).
+
 ### The "update the project memory" trigger (binding on every agent)
 When the owner says **"update the project memory"** (or a synonym — "update memory", "record this"),
 do BOTH: (1) revise all relevant `cmem/` files and refresh the Files-table pointers (absolute dates;
@@ -32,4 +39,4 @@ the expected adder output.
 
 | File | What it holds |
 | --- | --- |
-| [overview.md](overview.md) | What this Zig port is, its language/runtime, repo hosting (`synapticforge1` org since 2026-10-21; JSR stays `@jrmarcum`), API surface, how it links the C loader + wasmtime, build/run flow, and known gaps (incl. the exFAT git-pack fix, `maintenance.strategy gc`, applied 2026-10-21) |
+| [overview.md](overview.md) | What this Zig port is, scripts (Bun/TS only; `.sh`/`.nu` ported + deleted 2026-10-21), its language/runtime, repo hosting (`synapticforge1` org since 2026-10-21; JSR stays `@jrmarcum`), API surface, how it links the C loader + wasmtime, build/run flow, and known gaps (incl. the exFAT git-pack fix, `maintenance.strategy gc`, applied 2026-10-21) |
