@@ -12,6 +12,17 @@ import {
   VERSION_RE,
   ZON,
 } from "./_lib.ts";
+import {
+  currentSurface,
+  describeTests,
+  floorOf,
+  levelOf,
+  previousTests,
+  printFloor,
+  rank,
+  releaseTags,
+  surfaceAt,
+} from "./compat.ts";
 
 const USAGE = `
 Bump the project version in build.zig.zon (the single source of truth).
@@ -32,6 +43,12 @@ Usage: bun scripts/bump-version.ts <major|minor|patch|X.Y.Z> [options]
 Refuses to run on a dirty tree (so the bump lands as an isolated commit) and
 rejects a target that isn't strictly greater than the current version or whose
 tag already exists.
+
+The compatibility gate (scripts/compat.ts) runs first, --dry-run included:
+api-surface.txt must be current, the bump must not be below the FLOOR the
+surface diff against the last release tag computes (removed/changed -> major,
+added -> minor), and a patch or minor needs that tag's tests to pass against
+today's source.
 `;
 
 process.chdir(ROOT);
@@ -75,6 +92,28 @@ const cmp = (a: string, b: string): number => {
 };
 if (cmp(next, cur) <= 0) die(`target ${next} is not greater than current ${cur}.`);
 if (tagExists(`v${next}`)) die(`tag v${next} already exists.`);
+
+// --- Compatibility gate (workspace Rules 1-3) -------------------------------
+const lastTag = releaseTags()[0];
+if (lastTag) {
+  if (`v${cur}` !== lastTag) {
+    die(`the version line (${cur}) is not the last release tag (${lastTag}); a bump starts from a released version.`);
+  }
+  const step = levelOf(cur, next);
+  const f = floorOf(surfaceAt(lastTag), currentSurface());
+  printFloor(lastTag, f);
+  if (rank(step) < rank(f.floor)) die(`a ${step} bump is below the floor (${f.floor}).`);
+  if (step !== "major") {
+    const r = previousTests(lastTag);
+    console.log(describeTests(lastTag, r));
+    if (!r.ok) {
+      console.error(r.output);
+      die(`a ${step} bump requires the previous tag's tests to pass.`);
+    }
+  }
+} else {
+  console.log("no release tag yet; the compatibility gate has nothing to compare");
+}
 
 console.log(`Bumping version: ${cur} -> ${next}`);
 

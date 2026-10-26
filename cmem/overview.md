@@ -59,6 +59,9 @@ Working tree:
   - `fetch-wasmtime.ts` — downloads the wasmtime C API SDK into `vendor/` (gitignored).
   - `bump-version.ts` / `release.ts` / `publish.ts` — the release toolchain (see "Release / publish
     flow" below).
+  - `surface.ts` / `compat.ts` — the compatibility gate (2026-10-26, [compat-gate.md](compat-gate.md));
+    `tools/surface.zig` is its `zig build surface` step (a build step, not a script — the owner's
+    wazmrt ruling), `api-surface.txt` its committed snapshot.
   - `_lib.ts` — shared helpers (repo root, `exec`/`capture`/dry-run `runner`, `.version` read, git
     checks); not runnable on its own.
 - **Migration record (2026-10-21):** the four Bash scripts and three Nushell twins were ported 1:1
@@ -163,9 +166,11 @@ Bash `.sh` + Nushell `.nu` pairs). `-h`/`--help` prints each one's usage.
 
 1. **`scripts/bump-version.ts <major|minor|patch|X.Y.Z>`** — rewrites `.version` in `build.zig.zon`
    and commits the isolated bump. Guards: clean tree, strictly-greater target, no pre-existing tag,
-   valid semver. `--dry-run` / `--no-commit`.
-2. **`scripts/release.ts`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`,
-   tags `v<version>`, pushes branch + tag to `origin`, and creates the matching **GitHub Release** via
+   valid semver, and (since 2026-10-26) the **compatibility gate** — fresh `api-surface.txt`, a
+   bump not below the floor vs the last tag, the last tag's tests green for a patch/minor
+   ([compat-gate.md](compat-gate.md)). `--dry-run` / `--no-commit`.
+2. **`scripts/release.ts`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`
+   and `zig build test`, runs `compat.ts --release` (since 2026-10-26), tags `v<version>`, pushes branch + tag to `origin`, and creates the matching **GitHub Release** via
    `gh` (skippable). Idempotent (reuses a tag only if it points at HEAD; skips an existing Release;
    degrades if `gh` is unauthenticated). Does **not** touch Zigistry. `--dry-run` / `--no-release` /
    `--no-build` / `--remote`.

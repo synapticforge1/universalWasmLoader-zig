@@ -19,15 +19,21 @@ pub fn build(b: *std.Build) void {
     const wt_libdir = b.path(b.pathJoin(&.{ wasmtime_dir, "lib" }));
     const wt_dll = b.path(b.pathJoin(&.{ wasmtime_dir, "lib", "wasmtime.dll" }));
 
+    // The compatibility gate (scripts/compat.ts) points these at a previous
+    // tag's files extracted under .compat/; everyone else uses the defaults.
+    const src_dir = b.option([]const u8, "src", "Directory of the binding's source (default: src)") orelse "src";
+    const test_root = b.option([]const u8, "test-root", "Test suite root file (default: tests/uwl_test.zig)") orelse "tests/uwl_test.zig";
+    const test_cwd = b.option([]const u8, "test-cwd", "Directory the test suite runs in (default: the repo root)") orelse ".";
+
     const uwl_mod = b.addModule("uwl", .{
-        .root_source_file = b.path("src/uwl.zig"),
+        .root_source_file = b.path(b.pathJoin(&.{ src_dir, "uwl.zig" })),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    uwl_mod.addIncludePath(b.path("src")); // vendored universal_wasm_loader.h
+    uwl_mod.addIncludePath(b.path(src_dir)); // vendored universal_wasm_loader.h
     uwl_mod.addIncludePath(wt_inc);
-    uwl_mod.addCSourceFile(.{ .file = b.path("src/uwl_impl.c"), .flags = &.{"-std=c11"} });
+    uwl_mod.addCSourceFile(.{ .file = b.path(b.pathJoin(&.{ src_dir, "uwl_impl.c" })), .flags = &.{"-std=c11"} });
     // Link the import library (shared). The static archive pulls in the Rust
     // std unwinder (_Unwind_*), which Zig's lld does not provide.
     uwl_mod.addLibraryPath(wt_libdir);
@@ -64,7 +70,7 @@ pub fn build(b: *std.Build) void {
     // stalls the runner forever (hung >10 min, 2026-10-26).
     const tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/uwl_test.zig"),
+            .root_source_file = b.path(test_root),
             .target = target,
             .optimize = optimize,
             .imports = &.{.{ .name = "uwl", .module = uwl_mod }},
@@ -72,8 +78,26 @@ pub fn build(b: *std.Build) void {
     });
     const run_tests = std.Build.Step.Run.create(b, "run uwl tests");
     run_tests.addArtifactArg(tests);
-    run_tests.setCwd(b.path("."));
+    run_tests.setCwd(b.path(test_cwd));
+    // A cwd other than the repo root has no staged wasmtime.dll; PATH finds it.
+    run_tests.addPathDir(b.pathFromRoot(b.pathJoin(&.{ wasmtime_dir, "lib" })));
     run_tests.step.dependOn(&stage_dll.step);
     const test_step = b.step("test", "Run the reference test suite");
     test_step.dependOn(&run_tests.step);
+
+    // `zig build surface` — print the public surface (tools/surface.zig);
+    // scripts/surface.ts diffs it against the committed api-surface.txt.
+    const surface_tool = b.addExecutable(.{
+        .name = "surface",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/surface.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "uwl", .module = uwl_mod }},
+        }),
+    });
+    const run_surface = b.addRunArtifact(surface_tool);
+    run_surface.addPathDir(b.pathFromRoot(b.pathJoin(&.{ wasmtime_dir, "lib" })));
+    const surface_step = b.step("surface", "Print the public API surface");
+    surface_step.dependOn(&run_surface.step);
 }

@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import {
   capture,
   die,
+  exec,
   has,
   help,
   readVersion,
@@ -27,7 +28,8 @@ Release is human-readable polish.
 Usage: bun scripts/release.ts [options]
   --notes <text>   Release notes body (default: a generic line).
   --no-release     Push the tag only; skip creating a GitHub Release.
-  --no-build       Skip the cold-cache \`zig build run\` verification.
+  --no-build       Skip the cold-cache \`zig build run\` / \`zig build test\`
+                   verification (the compatibility gate still runs).
   --remote <name>  Git remote to push to (default: origin).
   --dry-run        Print what would happen; make no tags/pushes/releases.
   -h, --help       Show this help.
@@ -89,7 +91,14 @@ if (doBuild) {
   console.log("+ rm -rf .zig-cache");
   if (!dryRun) rmSync(".zig-cache", { recursive: true, force: true });
   run(["zig", "build", "run"]);
+  run(["zig", "build", "test"]);
 }
+
+// --- Compatibility gate: .version vs the tag before it (Rules 1-3) ----------
+// Runs under --dry-run too: it changes nothing, and a release it would block
+// should be known before anything is tagged.
+console.log("+ bun scripts/compat.ts --release");
+exec(["bun", "scripts/compat.ts", "--release"]);
 
 // --- Tag, push, release -----------------------------------------------------
 if (!tagIsThere) run(["git", "tag", "-a", tag, "-m", `universalWasmLoader-zig ${tag}`]);

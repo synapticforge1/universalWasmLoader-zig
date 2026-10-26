@@ -77,6 +77,21 @@ Zig's `lld` does not provide. `zig build` ships `wasmtime.dll` next to the binar
   bare `error: Unexpected`. Workaround: `rm -rf .zig-cache` before building, or
   build on an NTFS volume. A cold-cache `zig build run` is reliable.
 
+## Versioning & breaking changes
+
+Releases follow [Semantic Versioning 2.0.0](https://semver.org). The public surface — every
+public declaration of the `uwl` module, the raw `uwl.c` layer it re-exports, and the loader SPEC
+version it conforms to — is snapshotted in [`api-surface.txt`](api-surface.txt), and a release is
+gated against it: anything removed or changed requires a major version, anything added at least a
+minor, and a patch or minor release must also pass the previous release's test suite unmodified.
+Removals are deprecated for at least one minor release first and listed below.
+
+### ⚠️ Breaking Changes
+
+| Version | Change | Migration |
+| --- | --- | --- |
+| — | None since 1.0.0. | — |
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -4,6 +4,9 @@
 # wasmtime.dll staged at the repo root by `zig build run`
 /wasmtime.dll
 
+# A previous tag's src/ and tests/, extracted by scripts/compat.ts (deleted after)
+/.compat/
+
 # Private, machine-local memory (workspace § Records)
 cmem/local/
 
