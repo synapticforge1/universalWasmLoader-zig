@@ -33,9 +33,10 @@ there — tagging/pushing/releasing is scripts/release.ts's job. Typical flow:
     bun scripts/bump-version.ts minor   # 1.0.0 -> 1.1.0, commits the bump
     bun scripts/release.ts              # tags v1.1.0, pushes, GitHub Release
 
-Usage: bun scripts/bump-version.ts <major|minor|patch|X.Y.Z> [options]
+Usage: bun scripts/bump-version.ts <major|minor|patch> [options]
   major|minor|patch   Increment that semver component (resets lower ones).
-  X.Y.Z               Set an explicit version (must be valid semver).
+                      Nothing else is accepted (workspace rule: SemVer 2.0.0,
+                      no hand-set versions).
   --no-commit         Edit build.zig.zon only; don't commit.
   --dry-run           Print the new version + planned actions; change nothing.
   -h, --help          Show this help.
@@ -63,10 +64,9 @@ for (const arg of process.argv.slice(2)) {
   else if (arg === "--dry-run") dryRun = true;
   else if (arg === "-h" || arg === "--help") help(USAGE);
   else if (arg === "major" || arg === "minor" || arg === "patch") spec = arg;
-  else if (/^\d.*\.\d.*\.\d/.test(arg)) spec = arg;
-  else die(`unknown argument: ${arg}`, 2);
+  else die(`unknown argument: ${arg} (a bump is major|minor|patch)`, 2);
 }
-if (!spec) die("missing bump spec (major|minor|patch|X.Y.Z). See --help.", 2);
+if (!spec) die("missing bump spec (major|minor|patch). See --help.", 2);
 
 const run = runner(dryRun);
 
@@ -79,9 +79,7 @@ const [ma, mi, pa] = cur.split(".").map(Number);
 let next: string;
 if (spec === "major") next = `${ma + 1}.0.0`;
 else if (spec === "minor") next = `${ma}.${mi + 1}.0`;
-else if (spec === "patch") next = `${ma}.${mi}.${pa + 1}`;
-else if (SEMVER.test(spec)) next = spec;
-else die(`'${spec}' is not valid semver (X.Y.Z).`, 2);
+else next = `${ma}.${mi}.${pa + 1}`;
 
 // --- Validate (strictly greater, tag free) ----------------------------------
 const cmp = (a: string, b: string): number => {

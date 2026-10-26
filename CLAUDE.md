@@ -1,8 +1,11 @@
 > **⚠️ PORTABLE PROJECT MEMORY LIVES IN `cmem/`** — start at [`cmem/INDEX.md`](cmem/INDEX.md).
 
-> **At session start, read `../../cmem/handoffs.md` for letters addressed to this repo.** The workspace
-> session (`../../cmem/INDEX.md`) reviews across the sibling repos and reports there; nothing is ever
-> written into this repo from outside. (owner directive, 2026-09-20)
+> **At session start, and before each new work item, read `../../cmem/workspace-correspondence.md`**
+> — every open row addressed to this repo or touching what you will change — **then the letter it
+> points to in `../../cmem/handoffs.md`.** The workspace session (`../../cmem/INDEX.md`) reviews across
+> the sibling repos and reports there; nothing is ever written into this repo from outside. Answer a
+> row by writing your commit into its "full text" cell; only the row's creator closes it. (owner
+> directives, 2026-09-20 and 2026-10-26)
 
 > When saving new project memory, write it into the matching `cmem/` topic file (and refresh its
 > pointer in `cmem/INDEX.md`). The **"update the project memory"** and **"look for code issues"**
@@ -22,8 +25,10 @@ docs and [`cmem/overview.md`](cmem/overview.md) for the project memory.
   C header as `uwl.c`.
 - `src/uwl_impl.c` + `src/universal_wasm_loader.h` — vendored C loader compiled into the module.
 - `build.zig` — compiles the loader, links the wasmtime **import** library (not the static archive),
-  stages `wasmtime.dll`, defines the `run` step.
+  stages `wasmtime.dll`, defines the `run`, `test` and `surface` steps.
 - `scripts/*.ts` — all tooling is Bun + TypeScript only (`bun scripts/<name>.ts`); no shell scripts.
   `fetch-wasmtime.ts` fetches the wasmtime C API SDK into `vendor/` (gitignored).
 - `zig build run` — builds + runs `examples/adder.zig`.
 - `zig build test` — the reference suite (`tests/uwl_test.zig`) over the stamped fixtures in `tests/`.
+- Releases: `bun scripts/bump-version.ts patch|minor|major` runs the compatibility gate
+  ([`cmem/compat-gate.md`](cmem/compat-gate.md)); a surface change re-baselines alone first.

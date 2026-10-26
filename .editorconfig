@@ -1,0 +1,11 @@
+root = true
+
+# LF line endings for every file editors create or save (matches .gitattributes).
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+
+# Fixture text feeds the sha256 stamp in tests/fixtures.json: never trimmed.
+[*.{wat,wit}]
+trim_trailing_whitespace = false

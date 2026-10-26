@@ -8,9 +8,13 @@
 /.compat/
 
 # Private, machine-local memory (workspace § Records)
-cmem/local/
+/cmem/local/
+
+# Per-machine Claude Code settings: an allowlist from one machine must never
+# pre-approve commands on another checkout (workspace layout § Repo skeleton)
+/.claude/
 
 # Zig build artifacts
-.zig-cache/
-zig-cache/
-zig-out/
+/.zig-cache/
+/zig-cache/
+/zig-out/

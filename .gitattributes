@@ -1,5 +1,9 @@
 * text=auto eol=lf
 
+# Fixture text whose bytes feed tests/fixtures.json's sha256: explicit LF
+*.wat text eol=lf
+*.wit text eol=lf
+
 # Binaries: never converted, never diffed as text
 *.wasm binary
 *.dll binary

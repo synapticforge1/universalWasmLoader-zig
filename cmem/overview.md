@@ -42,7 +42,11 @@ Working tree:
 - `src/uwl_impl.c` — 3-line TU that `#define UWL_IMPLEMENTATION` + includes the header to compile the
   loader body into the module.
 - `src/universal_wasm_loader.h` — **vendored copy** of the upstream C single-header loader. Keep in
-  sync with the `universalWasmLoader-c` release being targeted.
+  sync with the `universalWasmLoader-c` release being targeted. **Provenance (★ 3.8), measured
+  2026-10-26:** sha256 `f3af614377e34f209ad47555720536e4b9e768b483ec7d77321319047d1a2b88`, byte-identical
+  to loader-c's `universal_wasm_loader.h` at its v1.1.1 (whose header is byte-identical to v1.1.0);
+  SPEC 3.0.0. The copy predates this record (2026-06-19), so which tag it was first taken from is
+  not recorded. On the next sync, re-stamp: the -c tag, the sha256, the date.
 - `examples/adder.zig` — the runnable example (`zig build run`); loads `tests/math_50.wasm`. Its
   own `examples/math_50.*` copy (an older build, wasm bytes NOT the stamped set) was deleted
   2026-10-26 so one copy exists (★ 4.1).
@@ -53,7 +57,8 @@ Working tree:
   `v2.0.3-64-g4a5c3cf`). Never regenerate them here — copy a new stamped set from -js (loader-dart
   found `generator.describe` differs per clone). `.gitattributes` pins LF and marks `*.wasm`
   binary, so the bytes the hashes cover are never converted.
-- `build.zig` — compiles the C loader, links wasmtime, stages `wasmtime.dll`, defines `run` step.
+- `build.zig` — compiles the C loader, links wasmtime, stages `wasmtime.dll`, defines the `run`,
+  `test` and `surface` steps and the gate's `-Dsrc` / `-Dtest-root` / `-Dtest-cwd` options.
 - `scripts/*.ts` — **all tooling, Bun + TypeScript only** ([INDEX.md](INDEX.md) § "Scripting rule"),
   run as `bun scripts/<name>.ts`; no `package.json`, no dependencies (Bun globals + `node:` built-ins).
   - `fetch-wasmtime.ts` — downloads the wasmtime C API SDK into `vendor/` (gitignored).
@@ -152,10 +157,11 @@ stack `[N]uwl_val_t`. The C loader re-narrows each value to the export's actual 
 - **Build cache on NTFS:** set `ZIG_LOCAL_CACHE_DIR` to a convention path on an NTFS drive (e.g.
   `C:\zig-cache\uwl-zig`) when the repo sits on exFAT; used for every build on 2026-10-26.
 - **Testing scripts without touching the repo:** clone into the session scratchpad on `C:` (NTFS) and
-  run there. Two flags are needed on this machine: `git -c safe.directory=* -c core.longpaths=true
-  clone -c core.longpaths=true <abs repo path> <dir>` — a `./` source path misses the `safe.directory`
-  entry, and the scratchpad path is long enough to hit `Filename too long`. PowerShell 5.1's
-  `Get-FileHash` also fails on those long paths; compare trees with a Bun script instead.
+  run there: `git -c core.longpaths=true clone -c core.longpaths=true <abs repo path> <dir>` (the
+  scratchpad path is long enough to hit `Filename too long`), then copy `vendor/` in (gitignored, so
+  not cloned). The `-c safe.directory=*` this needed until 2026-10-26 is no longer required — the
+  system config now covers the workspace folder (ledger C9; a clone worked without it the same day).
+  PowerShell 5.1's `Get-FileHash` fails on those long paths; compare trees with a Bun script instead.
 
 ## Release / publish flow (AUTHORED 2026-06-19)
 
@@ -164,9 +170,10 @@ order, keep the git tag, GitHub release, and Zigistry listing consistent with it
 TypeScript (`bun scripts/<name>.ts`, cross-platform; since 2026-10-21 — they replaced the 2026-06-19
 Bash `.sh` + Nushell `.nu` pairs). `-h`/`--help` prints each one's usage.
 
-1. **`scripts/bump-version.ts <major|minor|patch|X.Y.Z>`** — rewrites `.version` in `build.zig.zon`
-   and commits the isolated bump. Guards: clean tree, strictly-greater target, no pre-existing tag,
-   valid semver, and (since 2026-10-26) the **compatibility gate** — fresh `api-surface.txt`, a
+1. **`scripts/bump-version.ts <major|minor|patch>`** — rewrites `.version` in `build.zig.zon`
+   and commits the isolated bump. The explicit `X.Y.Z` form was removed 2026-10-26 (workspace
+   versioning rule: bump scripts take patch | minor | major and refuse anything else). Guards: clean
+   tree, strictly-greater target, no pre-existing tag, and (since 2026-10-26) the **compatibility gate** — fresh `api-surface.txt`, a
    bump not below the floor vs the last tag, the last tag's tests green for a patch/minor
    ([compat-gate.md](compat-gate.md)). `--dry-run` / `--no-commit`.
 2. **`scripts/release.ts`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`

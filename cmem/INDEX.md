@@ -32,14 +32,24 @@ comprehensive audit of the Zig binding (`src/uwl.zig`) and its C-link glue (`src
 `build.zig`) for: (1) workarounds / temporary hacks; (2) dead code; (3) bugs (wrong comptime type
 dispatch in `toVal`/`call`, leaked C-owned strings, missing `uwl_val_free`/`uwl_string_free`, missing
 `null` checks on `[*c]` returns); and (4) silent fall-throughs (returning a default instead of
-erroring). Report `file:line` + severity, fix the safe ones, and confirm `zig build run` still prints
-the expected adder output.
+erroring). Report `file:line` + severity, fix the safe ones, and run the regression gate below.
+
+### The regression gate (workspace trigger 6, binding on every agent)
+A CHANGE to `src/`, `build.zig` or `tests/` runs, on the committed tree after the last edit, reading
+every exit code AND output: `zig build test` (`All N tests passed.`), `zig build run` (the three
+adder lines), `bun scripts/surface.ts --check`. A batch with none of those changes does not. On
+exFAT, point `ZIG_LOCAL_CACHE_DIR` at an NTFS convention path ([overview.md](overview.md)).
+
+### Workspace triggers (binding here; full text `../../../cmem/INDEX.md` § Triggers)
+**Correspondence before new work** — read `../../../cmem/workspace-correspondence.md` for open rows
+addressed to this repo or touching the change, first. **Divergence** — a cross-repo difference found
+here is filed in `../../../cmem/divergences.md` with a class, in the same session.
 
 ## Files
 
 | File | What it holds |
 | --- | --- |
-| [compat-gate.md](compat-gate.md) | The compatibility gate (H6, 2026-10-26): surface by reflection (`tools/surface.zig` → `api-surface.txt`), floor + previous-tag tests (`scripts/compat.ts`), wired into `bump-version.ts` / `release.ts`; inverted end to end |
-| [working-rules.md](working-rules.md) | Repo-local rules over the workspace floor: privacy path test ("machine-specific?"), binary scans, the maintainer-email exception, `cmem/local/` (letters H22, H25 §3(d), H28; 2026-10-26) |
-| [best-practices.md](best-practices.md) | Method: this repo's own rules (§ L: L1 a test runner owning stdout vs a WASI guest, 2026-10-26) + the workspace's 28 ★ rules copied verbatim, stamped `Copied from synapticforge1/cmem/best-practices.md on 2026-10-26` (H6, H24, H27, C8) |
-| [overview.md](overview.md) | What this Zig port is, scripts (Bun/TS only; `.sh`/`.nu` ported + deleted 2026-10-21), its language/runtime, repo hosting (`synapticforge1` org since 2026-10-21; JSR stays `@jrmarcum`), API surface, how it links the C loader + wasmtime, build/run/test flow (`zig build test`, 11 tests over the stamped H7 fixtures, inverted, 2026-10-26), and known gaps (incl. the exFAT git-pack fix, `maintenance.strategy gc`, applied 2026-10-21) |
+| [compat-gate.md](compat-gate.md) | The compatibility gate: surface by reflection → `api-surface.txt`, the floor, previous-tag tests; its inversion |
+| [working-rules.md](working-rules.md) | Repo-local rules over the workspace floor: privacy (path test, binary scans, the maintainer-email exception) |
+| [best-practices.md](best-practices.md) | Method: this repo's § L rules + the workspace's 28 ★ rules, copied verbatim under a dated stamp |
+| [overview.md](overview.md) | What the port is, hosting, API surface, linking, the vendored header's provenance, build/run/test and release flow, known gaps |
