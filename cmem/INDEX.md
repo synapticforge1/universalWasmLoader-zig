@@ -39,4 +39,6 @@ the expected adder output.
 
 | File | What it holds |
 | --- | --- |
+| [working-rules.md](working-rules.md) | Repo-local rules over the workspace floor: privacy path test ("machine-specific?"), binary scans, the maintainer-email exception, `cmem/local/` (letters H22, H25 §3(d), H28; 2026-10-26) |
+| [best-practices.md](best-practices.md) | Method: this repo's own rules (§ L, none yet) + the workspace's 28 ★ rules copied verbatim, stamped `Copied from synapticforge1/cmem/best-practices.md on 2026-10-26` (H6, H24, H27, C8) |
 | [overview.md](overview.md) | What this Zig port is, scripts (Bun/TS only; `.sh`/`.nu` ported + deleted 2026-10-21), its language/runtime, repo hosting (`synapticforge1` org since 2026-10-21; JSR stays `@jrmarcum`), API surface, how it links the C loader + wasmtime, build/run flow, and known gaps (incl. the exFAT git-pack fix, `maintenance.strategy gc`, applied 2026-10-21) |

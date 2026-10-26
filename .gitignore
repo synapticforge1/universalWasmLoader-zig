@@ -4,6 +4,9 @@
 # wasmtime.dll staged at the repo root by `zig build run`
 /wasmtime.dll
 
+# Private, machine-local memory (workspace § Records)
+cmem/local/
+
 # Zig build artifacts
 .zig-cache/
 zig-cache/
