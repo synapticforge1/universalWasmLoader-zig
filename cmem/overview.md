@@ -43,8 +43,16 @@ Working tree:
   loader body into the module.
 - `src/universal_wasm_loader.h` — **vendored copy** of the upstream C single-header loader. Keep in
   sync with the `universalWasmLoader-c` release being targeted.
-- `examples/adder.zig` — the runnable example (`zig build run`). `examples/math_50.wasm` +
-  `math_50.wit` are the reference fixture.
+- `examples/adder.zig` — the runnable example (`zig build run`); loads `tests/math_50.wasm`. Its
+  own `examples/math_50.*` copy (an older build, wasm bytes NOT the stamped set) was deleted
+  2026-10-26 so one copy exists (★ 4.1).
+- `tests/` (2026-10-26, workspace letter H7) — `uwl_test.zig` (the SPEC §8 suite) and the
+  workspace's **stamped reference fixtures**, copied UNMODIFIED from universalWasmLoader-js
+  `36aa661` (= loader-c `39050b1`, byte-identical): the five `*_50.wasm`/`.wit`,
+  `init_check.wat`/`.wasm`, and `fixtures.json` (generator wasmtk `4a5c3cf668d`,
+  `v2.0.3-64-g4a5c3cf`). Never regenerate them here — copy a new stamped set from -js (loader-dart
+  found `generator.describe` differs per clone). `.gitattributes` pins LF and marks `*.wasm`
+  binary, so the bytes the hashes cover are never converted.
 - `build.zig` — compiles the C loader, links wasmtime, stages `wasmtime.dll`, defines `run` step.
 - `scripts/*.ts` — **all tooling, Bun + TypeScript only** ([INDEX.md](INDEX.md) § "Scripting rule"),
   run as `bun scripts/<name>.ts`; no `package.json`, no dependencies (Bun globals + `node:` built-ins).
@@ -123,6 +131,23 @@ stack `[N]uwl_val_t`. The C loader re-narrows each value to the export's actual 
   ```
   **Verified 2026-06-19** (Zig 0.16.0) — matches the README. **Re-verified 2026-10-21** in a scratch
   clone on `C:` against an SDK freshly fetched by `fetch-wasmtime.ts`.
+- `zig build test` — the reference suite, **11 tests** (2026-10-26): every fixture's sha256 against
+  `fixtures.json` (both directions: nothing listed missing, nothing unlisted); math, booleans,
+  strings (`callStr`), `init_check` (`_initialize` ran → 99, raw no-`.wit` path), `wasi_io_50`
+  (`logAndDouble(21) == 42`; it prints `doubling` through WASI — expected), version pin `@9` →
+  `ImportFailed`; the binding's own error paths (missing file → `ImportFailed`, unknown export →
+  `CallFailed`, `callStr` on an `i32` export → `WrongResultType`); and `imports_50` through the
+  RAW `uwl.c` layer with `callconv(.c)` Zig callbacks (host imports are not on `Module`). Singleton
+  and pool are not tested here: they are C-only surface, tested in -c. Ends with `All 11 tests
+  passed.` **Inverted 2026-10-26** (restored after each): `math_50.wasm` one byte short → 4 red
+  (the hash test + the three loads of it); bool decode inverted in `call` → only booleans red;
+  `callStr`'s guard deleted → test 11 panics (null unwrap). A fourth mutant, dropping only the
+  `out.kind != UWL_STR` half of that guard, stays green — EQUIVALENT, not a gap: the C loader
+  leaves `str` NULL for every non-string result, so the other half still fires.
+  **The run step is a plain `Run` with the test binary as an argument, not `addRunArtifact`** — see
+  [best-practices.md](best-practices.md) L1.
+- **Build cache on NTFS:** set `ZIG_LOCAL_CACHE_DIR` to a convention path on an NTFS drive (e.g.
+  `C:\zig-cache\uwl-zig`) when the repo sits on exFAT; used for every build on 2026-10-26.
 - **Testing scripts without touching the repo:** clone into the session scratchpad on `C:` (NTFS) and
   run there. Two flags are needed on this machine: `git -c safe.directory=* -c core.longpaths=true
   clone -c core.longpaths=true <abs repo path> <dir>` — a `./` source path misses the `safe.directory`
@@ -166,8 +191,8 @@ optional polish. Next real version: `bump-version` → `release` (→ `publish`)
 
 ## Known gaps / not yet done
 
-- **No test suite.** Unlike `-c` (`spec_tests.c`, 29 assertions), this repo only ships the `adder`
-  example as a smoke test. A `zig build test` over the SPEC §8 fixtures is not yet authored.
+- **No CI.** `zig build test` (since 2026-10-26) runs by hand only; nothing runs it on push or tag.
+  Windows (`x86_64-mingw` SDK) is the only platform `build.zig` knows.
 - **Filesystem caveat (documented in README):** on some non-NTFS volumes ("do not record ownership"),
   Zig's build runner fails a **warm-cache** build with a bare `error: Unexpected`. Workaround:
   `rm -rf .zig-cache` before building (cold-cache is reliable), or build on an NTFS volume. Reproduced

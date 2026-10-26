@@ -26,3 +26,4 @@ docs and [`cmem/overview.md`](cmem/overview.md) for the project memory.
 - `scripts/*.ts` — all tooling is Bun + TypeScript only (`bun scripts/<name>.ts`); no shell scripts.
   `fetch-wasmtime.ts` fetches the wasmtime C API SDK into `vendor/` (gitignored).
 - `zig build run` — builds + runs `examples/adder.zig`.
+- `zig build test` — the reference suite (`tests/uwl_test.zig`) over the stamped fixtures in `tests/`.

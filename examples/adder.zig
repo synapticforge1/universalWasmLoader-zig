@@ -10,7 +10,7 @@ fn adder(m: uwl.Module, a: i32, b: i32) !i32 {
 }
 
 pub fn main() !void {
-    var m = uwl.Module.import("examples/math_50.wasm") catch {
+    var m = uwl.Module.import("tests/math_50.wasm") catch {
         std.debug.print("load failed: {s}\n", .{uwl.c.uwl_last_error()});
         return;
     };

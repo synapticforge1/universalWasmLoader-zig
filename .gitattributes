@@ -1,0 +1,6 @@
+* text=auto eol=lf
+
+# Binaries: never converted, never diffed as text
+*.wasm binary
+*.dll binary
+*.a binary

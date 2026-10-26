@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     // `zig build run` runs from the repo root; stage wasmtime.dll there so the
-    // OS loader finds it (examples/math_50.wasm resolves relative to cwd).
+    // OS loader finds it (tests/math_50.wasm resolves relative to cwd).
     const stage_dll = b.addUpdateSourceFiles();
     stage_dll.addCopyFileToSource(wt_dll, "wasmtime.dll");
 
@@ -55,4 +55,25 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run.addArgs(args);
     const run_step = b.step("run", "Run the adder example");
     run_step.dependOn(&run.step);
+
+    // `zig build test` — the SPEC §8 reference suite over tests/ (fixture
+    // paths resolve from the repo root, so the run's cwd is pinned there).
+    // Run as a plain artifact, NOT `addRunArtifact`: that puts the test runner
+    // in `--listen=-` mode, where stdout is the build protocol's pipe, and the
+    // loader's WASI context inherits stdout — wasi_io_50's `fd_write` then
+    // stalls the runner forever (hung >10 min, 2026-10-26).
+    const tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/uwl_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "uwl", .module = uwl_mod }},
+        }),
+    });
+    const run_tests = std.Build.Step.Run.create(b, "run uwl tests");
+    run_tests.addArtifactArg(tests);
+    run_tests.setCwd(b.path("."));
+    run_tests.step.dependOn(&stage_dll.step);
+    const test_step = b.step("test", "Run the reference test suite");
+    test_step.dependOn(&run_tests.step);
 }

@@ -6,7 +6,13 @@ free number; numbers are never reused.
 
 ## § L This repo's own rules
 
-(None yet.)
+- **L1 A test runner that owns stdout cannot host a guest that inherits it.** `zig build test`
+  hung for over ten minutes at 0.2 s of CPU: `addRunArtifact` runs a test binary with
+  `--listen=-`, so stdout is the build protocol's pipe, and the C loader's WASI context inherits
+  stdout — `wasi_io_50`'s `fd_write` ("doubling") stalled the runner. The same binary run directly
+  passed 11/11 (2026-10-26, [overview.md](overview.md) § "Build / run flow"). Run such a suite as a
+  plain `Run` step; when a run hangs idle, run the binary by hand before suspecting the code.
+  [universalWasmLoader-zig]
 
 ## ★ The workspace's convergent rules — a COPY, stamped 2026-10-26 (workspace letters H6, H24, H27, C8)
 

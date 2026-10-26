@@ -15,7 +15,7 @@ zero-duplication wrapper over it — built on the
 ```zig
 const uwl = @import("uwl");
 
-var m = try uwl.Module.import("examples/math_50.wasm");
+var m = try uwl.Module.import("tests/math_50.wasm");
 defer m.deinit();
 
 const sum = try m.call(i32, "add", .{ 3, 4 });           // 7
@@ -33,6 +33,7 @@ pass plain Zig values. A companion `.wit` next to the `.wasm` is required.
 ```sh
 bun scripts/fetch-wasmtime.ts   # downloads the wasmtime C API SDK into vendor/ (gitignored)
 zig build run                   # builds and runs examples/adder.zig
+zig build test                  # the reference test suite over tests/
 ```
 
 `zig build run` prints:
