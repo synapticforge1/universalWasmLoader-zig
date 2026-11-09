@@ -140,8 +140,8 @@ Removals are deprecated for at least one minor release first and listed below.
 
 | Version | Change | Migration |
 | --- | --- | --- |
-| 2.0.0 (unreleased) | SPEC 4.0.0, from C loader 2.0.0: only an absent `.wit` is raw; a `.wit` must parse strictly; every WIT import needs a callback and its return kind is checked; typed-call arguments are checked, never coerced — an `i64` is no longer narrowed to `s32`, nor an integer widened to `f64`; `call(T, …)` refuses a result of another kind. | Pass `i32` for `s32` and `f64` (or a float literal, `4.0`) for `f64`; load modules with imports through `importWith`; read `uwl.lastError()` for the reason. |
-| 2.0.0 (unreleased) | Requires Zig 0.17.1 (`@cImport` is gone; the header is translated by `build.zig`). | Build with Zig 0.17.1. |
+| 2.0.0 | SPEC 4.0.0, from C loader 2.0.0: only an absent `.wit` is raw; a `.wit` must parse strictly; every WIT import needs a callback and its return kind is checked; typed-call arguments are checked, never coerced — an `i64` is no longer narrowed to `s32`, nor an integer widened to `f64`; `call(T, …)` refuses a result of another kind. | Pass `i32` for `s32` and `f64` (or a float literal, `4.0`) for `f64`; load modules with imports through `importWith`; read `uwl.lastError()` for the reason. |
+| 2.0.0 | Requires Zig 0.17.1 (`@cImport` is gone; the header is translated by `build.zig`). | Build with Zig 0.17.1. |
 
 ## License
 

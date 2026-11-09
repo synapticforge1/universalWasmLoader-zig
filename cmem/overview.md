@@ -14,7 +14,8 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
   the WASM engine. See "Zig 0.17.1 port" below for what moved.
 - **What it gives Zig callers:** error unions instead of out-params, native Zig argument/result types,
   and a **comptime-typed call site** (`m.call(i32, "add", .{3,4})`) — no manual `uwl_val_t` boxing.
-- **Distribution:** a Zig module (`build.zig.zon` name `universal_wasm_loader`, v1.0.0, MIT) exposing
+- **Distribution:** a Zig module (`build.zig.zon` name `universal_wasm_loader`, v2.0.0 since
+  2026-11-08 (v1.0.0 before), MIT) exposing
   the importable module `uwl` (`b.addModule("uwl", ...)`). The MIT `LICENSE` file is listed in the
   manifest `paths`, so it ships with the published package.
 
@@ -34,7 +35,7 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
   current repo, so nothing in them hard-codes the owner. The Zigistry `zig-package` topic/listing
   follows the repo to its new owner path.
 
-## Current state — IMPLEMENTED v1 (2026-06-19)
+## Current state — v2.0.0 (2026-11-08: SPEC 4.0.0, Zig 0.17.1; v1 implemented 2026-06-19)
 
 Working tree:
 
@@ -258,6 +259,16 @@ topic** remain for the owner to do once `gh` is authenticated (`gh` is installed
 on the build host, re-checked 2026-10-21). Zigistry needs only the topic + a push; the GitHub Release is
 optional polish. Next real version: `bump-version` → `release` (→ `publish`) will tag at HEAD.
 
+**v2.0.0 (2026-11-08, owner: "update the project memory files, commit, bump, then release and
+push"):** the first release through the compatibility gate. `bump-version.ts major` (floor major:
+SPEC 3.0.0 → 4.0.0, and v1.0.0's surface is not computable on Zig 0.17.1), then `release.ts`
+with `ZIG_LOCAL_CACHE_DIR` pointed at a NEW empty directory, so its "cold-cache" build really is
+cold (it only deletes the repo's own `.zig-cache`, which an NTFS cache dir bypasses). **`gh` is not
+installed on the build host (2026-11-08: not on PATH in Bash or PowerShell)**, so `release.ts`
+pushes the tag and skips the GitHub Release with a warning; the Release and the Zigistry topic
+(`publish.ts`, needs `gh`) stay owner items. The release record (tag id, `ls-remote` read-back)
+is in the memory commit after the tag.
+
 ## Known gaps / not yet done
 
 - **No CI.** `zig build test` (since 2026-10-26) runs by hand only; nothing runs it on push or tag.
@@ -294,8 +305,8 @@ optional polish. Next real version: `bump-version` → `release` (→ `publish`)
   kinds, those refusal checks fail by design: update them with the README. 23 tests.
 - **Version decision for SPEC 4.0.0 (2026-11-08): MAJOR, 2.0.0, agreed by the owner** ("I agree
   that next version would be 2.0.0") — the gate's floor vs `v1.0.0` is major (and v1.0.0's
-  surface is not computable on Zig 0.17.1). The version line stays `1.0.0` until the owner says
-  to bump: `bump-version.ts major` → `release.ts` (nothing pushed; `main` is ahead of `origin` by
+  surface is not computable on Zig 0.17.1). Bumped and released 2026-11-08 (§ Release / publish
+  flow); before that the version line stayed `1.0.0` (`main` was ahead of `origin` by
   the earlier unpushed `541a02e` / `7cbe498` / `e4f026a` plus this session's commits).
 - **Vendored header drift:** `src/universal_wasm_loader.h` is a manual copy of upstream
   `universalWasmLoader-c`; there is no automated sync — bump it deliberately per targeted release.
