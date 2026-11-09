@@ -13,6 +13,17 @@ free number; numbers are never reused.
   passed 11/11 (2026-10-26, [overview.md](overview.md) § "Build / run flow"). Run such a suite as a
   plain `Run` step; when a run hangs idle, run the binary by hand before suspecting the code.
   [universalWasmLoader-zig]
+- **L2 An error union drops the message; a binding over a C API that returns one must keep it
+  where the caller can read it.** Until 2026-11-08 `Module.import` / `call` freed the loader's
+  error string unread and returned a bare `error.ImportFailed`, so no Zig caller could learn which
+  callback was missing or which parameter was wrong — and SPEC 4.0.0 defines each refusal by what
+  its message names. Now `uwl.lastError()`; nine tests assert on it, and a mutant that never sets
+  it turns exactly those nine red ([overview.md](overview.md) § Public API surface).
+  [universalWasmLoader-zig]
+- **L3 In Zig 0.17, code after a comptime-known `return` is still analyzed: a trailing
+  `@compileError` fires.** `toVal`'s `if (T == i32) return …; … @compileError(…)` rejected string
+  literals that an earlier branch had returned for; it is an `if` / `else if` / `else` chain now,
+  with the `@compileError` in the `else`. [universalWasmLoader-zig]
 
 ## ★ The workspace's convergent rules — a COPY, stamped 2026-10-26 (workspace letters H6, H24, H27, C8)
 

@@ -22,7 +22,9 @@ raw C layer `uwl.c` — every `uwl_` / `UWL_` name the translated header exposes
 VALUE (C integers are frozen), struct layouts including the anonymous `uwl_val.as` union. The C
 calling convention is keyed as `c`, so the surface is the same on every target. `surface.ts` adds
 the SPEC version from the header's leading comment (exactly once, as -c reads it). A form the tool
-cannot key is a compile error, never skipped. **112 symbols, SPEC 3.0.0, on 2026-10-26.**
+cannot key is a compile error, never skipped. **112 symbols, SPEC 3.0.0, on 2026-10-26; 118 symbols,
+SPEC 4.0.0, on 2026-11-08** (`importWith`, `lastError`, `HostCallback` + 3 fields; `8eae638`).
+Floor vs `v1.0.0` on 2026-11-08: **major** (`bump patch` refused, `bump major --dry-run` allowed).
 ⚠️ A generic function's return type is invisible to reflection (`Module.call` prints `generic`);
 Rule 3 is what sees a change there.
 

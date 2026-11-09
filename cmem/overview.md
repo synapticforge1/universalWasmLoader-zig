@@ -44,11 +44,13 @@ Working tree:
 - `src/uwl_impl.c` — 3-line TU that `#define UWL_IMPLEMENTATION` + includes the header to compile the
   loader body into the module.
 - `src/universal_wasm_loader.h` — **vendored copy** of the upstream C single-header loader. Keep in
-  sync with the `universalWasmLoader-c` release being targeted. **Provenance (★ 3.8), measured
-  2026-10-26:** sha256 `f3af614377e34f209ad47555720536e4b9e768b483ec7d77321319047d1a2b88`, byte-identical
-  to loader-c's `universal_wasm_loader.h` at its v1.1.1 (whose header is byte-identical to v1.1.0);
-  SPEC 3.0.0. The copy predates this record (2026-06-19), so which tag it was first taken from is
-  not recorded. On the next sync, re-stamp: the -c tag, the sha256, the date.
+  sync with the `universalWasmLoader-c` release being targeted. **Provenance (★ 3.8), 2026-11-08:**
+  copied with `git show v2.0.0:universal_wasm_loader.h` from loader-c (tag commit `56217b6`, the
+  tag CI green per its record); sha256
+  `5ffa482da1b788df6b5f4fbeac61ed899bac88ac2a67f6a08f659e2a80ee9e80`, = loader-c's working tree
+  the same day; **SPEC 4.0.0**. Before: `f3af6143…` = loader-c v1.1.1 (= v1.1.0), SPEC 3.0.0,
+  measured 2026-10-26; first copied 2026-06-19 from an unrecorded tag. On the next sync,
+  re-stamp: the -c tag, the sha256, the date.
 - `examples/adder.zig` — the runnable example (`zig build run`); loads `tests/math_50.wasm`. Its
   own `examples/math_50.*` copy (an older build, wasm bytes NOT the stamped set) was deleted
   2026-10-26 so one copy exists (★ 4.1).
@@ -104,32 +106,47 @@ Two gate consequences, fixed in `tools/surface.zig` / `scripts/compat.ts` (see
 `v1.0.0`'s `src/` no longer builds (it uses `@cImport`), so its surface is not computable.
 Result: `zig build test` 11/11, `zig build run` the three adder lines, unchanged from 0.16.0.
 
-## Public API surface (implemented)
+## Public API surface (SPEC 4.0.0, 2026-11-08; workspace ledger C29)
 
 All in `src/uwl.zig`. Idiomatic Zig over the C loader's explicit `uwl_call` core (NOT the C variadic
-convenience layer — argument types are checked at comptime on the Zig side instead).
+convenience layer). The C loader 2.0.0 does the checking (the `.wit` read first and parsed
+strictly, every import's callback, each argument's kind, each callback's return kind); the binding
+sends exact kinds, checks the result kind, and keeps the message. 118 symbols in `api-surface.txt`.
 
 - **`uwl.Module`** — a loaded, ABI-translated module (`handle: *c.uwl_module_t`).
-- **`Module.import(path: [:0]const u8) Error!Module`** — load a `.wasm`; its companion `.wit` is
-  auto-detected, a `@N` path suffix pins the version. Returns `error.ImportFailed` (frees the C error
-  string). Wraps `uwl_import`.
-- **`m.call(comptime T, name, args) Error!T`** — call an export returning
-  `i32`/`i64`/`f32`/`f64`/`bool`/`void`. `args` is a tuple of native values (`.{3,4}`). Frees the C
-  out-val via `defer uwl_val_free`. Unsupported `T` is a `@compileError`.
-- **`m.callStr(allocator, name, args) Error![]u8`** — call a string-returning export; result is
-  **copied into `allocator`** and owned by the caller (`allocator.free`). Returns
-  `error.WrongResultType` if the export didn't return a `UWL_STR`.
+- **`Module.import(path: [:0]const u8) Error!Module`** = `importWith(path, &.{})`: a module that
+  imports nothing (one with WIT imports is refused at load, naming every missing callback).
+- **`Module.importWith(path, callbacks: []const HostCallback) Error!Module`** (new 2026-11-08) —
+  wraps `uwl_import`. **`uwl.HostCallback`** = `c.uwl_host_callback_t` (name, `callconv(.c)` fn,
+  userdata). Before 2026-11-08 host imports needed the raw `uwl.c` layer (and SPEC § 7.1's
+  `hostCallbacks?` parameter was missing from the Zig API).
+- **`m.call(comptime T, name, args) Error!T`** — `i32`/`i64`/`f32`/`f64`/`bool`/`void`. A result
+  whose kind is not `T`'s (`void` ↔ UWL_VOID included) is `error.WrongResultType` with a message
+  `export 'add' returned s32, not f64`. Before 2026-11-08 it read the wrong union member silently
+  (divergence S8; the M2 mutant re-measured it: `call(f64, "add", 3, 4)` → `-8.9e66`).
+  Unsupported `T` is a `@compileError`. Stricter than -c's `uwl_call_void`, which discards a result.
+- **`m.callStr(allocator, name, args) Error![]u8`** — result **copied into `allocator`**, owned by
+  the caller; any non-string result is `error.WrongResultType`.
 - **`m.deinit()`** — `uwl_free` + poisons the handle.
+- **`uwl.lastError() []const u8`** (new 2026-11-08) — a thread-local copy (1 KiB, truncated) of the
+  C error string from this thread's last failed `import*` / `call` / `callStr`; `""` after a
+  success. Before, the C string was freed unread, so a Zig caller could not learn WHY anything
+  failed — and SPEC 4.0.0's refusals are defined by what their message names.
 - **`uwl.Error`** = `{ ImportFailed, CallFailed, WrongResultType, OutOfMemory }`.
-- **`uwl.c`** — the raw translated-header namespace (e.g. `uwl.c.uwl_last_error()` for the underlying
-  message). The escape hatch for raw (no-`.wit`) modules / anything not surfaced idiomatically.
+- **`uwl.c`** — the raw translated-header namespace; the singleton and the pool are there only.
 
-### Arg/result marshalling (comptime)
+### Argument marshalling (comptime, by Zig type — never a conversion)
 
-`toVal(v)` dispatches on `@typeInfo(@TypeOf(v))`: int→`uwl_i64`, float→`uwl_f64`, bool→`uwl_bool`,
-pointer→`uwl_str` (string literal / `[*:0]const u8`). `buildArgs` `inline for`s the args tuple into a
-stack `[N]uwl_val_t`. The C loader re-narrows each value to the export's actual WIT type, so passing
-`i64`/`f64` for narrower params is fine. **A companion `.wit` is required** (source of per-arg types).
+`toVal(v)`: `i32` → `uwl_i32` (s32), `i64` → `uwl_i64` (s64), `f32` → `uwl_f32`, `f64` →
+`uwl_f64`, `bool` → `uwl_bool`, a type coercing to `[]const u8` (slice or string literal) →
+`uwl_strn`; an integer literal is s32 if it fits, else s64 (outside s64: compile error); a float
+literal is f64. Any other type (`u8`, `usize`, `f16`, `[*:0]const u8`, …) is a compile error naming
+the accepted types. Chosen 2026-11-08 because the C API has no export-signature introspection, so
+the Zig side cannot see the WIT type; the type IS the kind, as SPEC § 4's port column says ("the
+language's 32-bit integer", "the floating type"), and the loader refuses a mismatch naming the
+export and the parameter. Until then every integer went as s64 and every float as f64 and the
+loader narrowed — SPEC 4.0.0 calls that coercion. `uwl_strn` COPIES; `raw()` frees every argument
+after the call (until 2026-11-08 the copies leaked, one per string argument per call).
 
 ## How it links
 
@@ -141,7 +158,7 @@ stack `[N]uwl_val_t`. The C loader re-narrows each value to the export's actual 
 - Links the MinGW syslibs wasmtime needs: `ws2_32 bcrypt userenv ntdll ole32 Shlwapi advapi32
   kernel32 uuid`.
 - `zig build run` stages `wasmtime.dll` at the repo root (via `addUpdateSourceFiles` /
-  `addCopyFileToSource`) so the OS loader finds it; the example resolves `examples/math_50.wasm`
+  `addCopyFileToSource`) so the OS loader finds it; the example resolves `tests/math_50.wasm`
   relative to cwd (repo root).
 
 ## Build / run flow
@@ -175,6 +192,25 @@ stack `[N]uwl_val_t`. The C loader re-narrows each value to the export's actual 
   leaves `str` NULL for every non-string result, so the other half still fires.
   **The run step is a plain `Run` with the test binary as an argument, not `addRunArtifact`** — see
   [best-practices.md](best-practices.md) L1.
+  **21 tests since 2026-11-08** (SPEC 4.0.0, ledger C29): `imports_50` now through `importWith`
+  (plus once through the raw layer), and ten SPEC § 8 "Refusals", each asserting what
+  `lastError()` names: no callbacks (`envMul` + `envAdd`); only `envMul` (`envAdd`, not `envMul`);
+  a null `fn` counts as missing; `envAdd` returning no value / `2.9 (f64)` / `true (bool)` /
+  `"17" (string)` / `17 (s64)` / `2147483648 (s64)` → `combine` fails naming `envAdd`, `env-add`,
+  `s32`, the value; a `string`-result import refused with no `.wasm` present (so before it is
+  read); typed arguments (`add("x",1)`, `add(2.7,1)`, `add(1,1<<31)`, `add(1, i64 1)`, `add(1)`,
+  `greet(42)`, `isEven("4")`, `isPositive(true)`; then a good call clears the message); result
+  kinds (`call(f64|bool|i64|void, "add")`, `call(i32, "multiply")`); a `.wit` that does not parse
+  (malformed parameter, `u32`, empty, text outside the world, duplicate parameter; a WIT export
+  the module lacks; the accepted forms — comments, `package`, CRLF, trailing comma — still load);
+  a `.wit` that is a directory; an absent `.wit` → raw. Scratch files go in `tests/` and are
+  removed (`git status` clean after every run). § 8's async and http rows are n/a: no async in
+  the C API, local files only (C29 item 5 n/a, as -c).
+  **Inverted 2026-11-08** (restored after each, header sha re-checked): the SPEC 3.0.0 header under
+  the new suite → `13 passed; 0 skipped; 8 failed.`, exactly the eight loader-level refusals (each
+  loads / returns 0 / says "failed to read"); result check deleted → only the S8 test red; `i64`
+  sent as s32 → only the typed-argument test red; `setError` a no-op → the nine tests that read
+  `lastError()` red.
 - **Build cache on NTFS:** set `ZIG_LOCAL_CACHE_DIR` to a convention path on an NTFS drive (e.g.
   `C:\zig-cache\uwl-zig`) when the repo sits on exFAT; used for every build on 2026-10-26.
 - **Testing scripts without touching the repo:** clone into the session scratchpad on `C:` (NTFS) and
@@ -240,10 +276,15 @@ optional polish. Next real version: `bump-version` → `release` (→ `publish`)
   1 pack / 44 KiB, `fsck --connectivity-only` clean. It lives in `.git/config`, so **a fresh clone
   needs it again**. Health check: `git count-objects -vH` — more than a handful of `packs:` means it
   is recurring.
-- **Host import callbacks** are not surfaced in the Zig API — `import` passes `null, 0` for callbacks.
-  Pure-compute / partial-import modules work; modules needing host imports must use the raw `uwl.c`
-  layer.
-- **String/aggregate args beyond flat scalars + strings** rely entirely on the C loader; no Zig-side
-  validation beyond the `toVal` type switch.
+- ~~Host import callbacks are not surfaced in the Zig API~~ — surfaced 2026-11-08
+  (`Module.importWith`). Singleton and pool are still raw-`uwl.c` only.
+- **An integer literal for an `s64` parameter goes as s32** (it fits) and is refused: write
+  `@as(i64, 5)`. Likewise a float literal for an `f32` parameter: `@as(f32, 2.5)`. Fixing that
+  needs a C API that reports an export's parameter kinds (`uwl_export_sig`-like), which loader-c
+  does not have; no fixture has an `s64` or `f32` parameter today.
+- **Version decision for SPEC 4.0.0 (2026-11-08): MAJOR, 2.0.0** — the gate's floor vs `v1.0.0` is
+  major (and v1.0.0's surface is not computable on Zig 0.17.1). The version line stays `1.0.0`:
+  `bump-version.ts major` → `release.ts` are the owner's (nothing pushed; `main` is ahead of
+  `origin` by the earlier unpushed `541a02e` / `7cbe498` / `e4f026a` plus this session's commits).
 - **Vendored header drift:** `src/universal_wasm_loader.h` is a manual copy of upstream
   `universalWasmLoader-c`; there is no automated sync — bump it deliberately per targeted release.
