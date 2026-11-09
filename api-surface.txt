@@ -2,6 +2,7 @@
 # Re-baseline in its own commit.
 spec 4.0.0
 const c.UWL_BOOL: c_int = 5
+const c.UWL_ERR: c_int = 7
 const c.UWL_F32: c_int = 3
 const c.UWL_F64: c_int = 4
 const c.UWL_I32: c_int = 1
@@ -56,6 +57,7 @@ fn c.uwl_call_i32: fn(?*c.struct_uwl_module, [*c]const u8) varargs c i32
 fn c.uwl_call_i64: fn(?*c.struct_uwl_module, [*c]const u8) varargs c i64
 fn c.uwl_call_str: fn(?*c.struct_uwl_module, [*c]const u8) varargs c [*c]u8
 fn c.uwl_call_void: fn(?*c.struct_uwl_module, [*c]const u8) varargs c void
+fn c.uwl_err: fn([*c]const u8) c c.struct_uwl_val
 fn c.uwl_f32: fn(f32) c c.struct_uwl_val
 fn c.uwl_f64: fn(f64) c c.struct_uwl_val
 fn c.uwl_free: fn(?*c.struct_uwl_module) c void
