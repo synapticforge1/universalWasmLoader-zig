@@ -30,7 +30,7 @@ Updates \`.version\` to the next semver, commits the one-line change, and stops
 there — tagging/pushing/releasing is scripts/release.ts's job. Typical flow:
 
     bun scripts/bump-version.ts minor   # 1.0.0 -> 1.1.0, commits the bump
-    bun scripts/release.ts              # tags v1.1.0, pushes, GitHub Release
+    bun scripts/release.ts              # tags v1.1.0, pushes, reads it back
 
 Usage: bun scripts/bump-version.ts <major|minor|patch> [options]
   major|minor|patch   Increment that semver component (resets lower ones).
@@ -135,5 +135,5 @@ if (doCommit) {
 
 console.log(`Done: ${next}`);
 if (doCommit) {
-  console.log(`Next: bun scripts/release.ts   # tags v${next}, pushes, creates the GitHub Release`);
+  console.log(`Next: bun scripts/release.ts   # tags v${next}, pushes, reads it back (ls-remote)`);
 }
