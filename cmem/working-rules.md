@@ -40,6 +40,26 @@ does not build an executable — workspace Tooling rule 1, letter H15).
   (the repo's topics). A task only the GitHub web UI can do — a Release page, the `zig-package`
   topic — is an **owner item**, printed as `OWNER ITEM (GitHub web UI): …` with its URL. Never
   plan around `gh`, never record anything as "blocked on gh" or "`gh` absent".
-- This repo has no CI workflow, so the rule bites only the local scripts: `release.ts` and
-  `publish.ts`, both `gh`-free since 2026-11-08 ([overview.md](overview.md) § Release / publish
-  flow). Check: `git grep -n -w gh -- scripts` finds nothing (2026-11-08).
+- `release.ts` and `publish.ts` are `gh`-free since 2026-11-08; the CI workflow (2026-11-09)
+  calls GitHub only through `scripts/github-release.ts` (REST, `GITHUB_TOKEN`)
+  ([overview.md](overview.md) § Release / publish flow). Check: `git grep -n -w gh -- .github
+  scripts` finds nothing (2026-11-09).
+
+## Release pages are made by CI (workspace letter H32)
+
+- 🔒 **Every tag's GitHub Release page is made by CI, never by hand and never with `gh`** (owner,
+  2026-11-09: "they both need the CI and release pages, not by hand"; "only new tags will get
+  release pages" — no backfill). Here: `.github/workflows/release.yml`'s `release` job, after the
+  `checks` job, in H32's order (tag exists and peels to the checked commit → an existing page is
+  done → POST, read back, re-check the tag). Change it under the gate and BEFORE a release, never
+  during one; it is proven only by a real tag run.
+
+## Bun versions (workspace Tooling rule 10, letter H31)
+
+- 🔒 **Every Bun-version notation is the latest installed Bun** (owner, 2026-11-09: "update any
+  notations on bun version to the latest installed version always"; the minimum supported Bun
+  too). Measure `bun --version` before writing one: 1.4.4 on 2026-11-09. Here the notations are
+  the workflow's `BUN_VERSION` and its two sha256 pins (from Bun's `SHASUMS256.txt`), moved
+  together at the session after the owner installs a newer Bun. A DATED test result keeps its
+  Bun until that test is re-run. Before 2026-11-09 this repo wrote no Bun version at all (H31's
+  survey).

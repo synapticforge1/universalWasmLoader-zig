@@ -32,3 +32,5 @@ docs and [`cmem/overview.md`](cmem/overview.md) for the project memory.
 - `zig build test` — the reference suite (`tests/uwl_test.zig`) over the stamped fixtures in `tests/`.
 - Releases: `bun scripts/bump-version.ts patch|minor|major` runs the compatibility gate
   ([`cmem/compat-gate.md`](cmem/compat-gate.md)); a surface change re-baselines alone first.
+  `bun scripts/release.ts` tags and pushes; the tag runs `.github/workflows/release.yml`, which
+  re-checks on GitHub and makes the Release page (workspace H32; never by hand, never `gh`).

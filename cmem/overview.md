@@ -50,7 +50,10 @@ Working tree:
   (later the same day, ledger C39):** copied with `git show v2.1.0:universal_wasm_loader.h` from
   loader-c (tag `v2.1.0^{}` = `edc6993` locally and on its `origin`, `ls-remote`); sha256
   `01a7ad5e432ac97bd5c83a69a221c6a1e2ef28b7a32160f47638a7ecd9afc14f`, = loader-c's working tree;
-  **SPEC 4.0.0**, adds `uwl_err` / `UWL_ERR`. Before: `5ffa482d…` = loader-c v2.0.0 (in this
+  **SPEC 4.0.0**, adds `uwl_err` / `UWL_ERR`. **loader-c v2.1.1 (2026-11-09) has the SAME header**
+  (`git diff v2.1.0 v2.1.1 -- universal_wasm_loader.h` empty, `git show v2.1.1:…` sha256 =
+  `01a7ad5e…`, tag `v2.1.1^{}` = `dc81b25` on its `origin`): its 2.1.1 was CI only (H31 Bun pin,
+  H32 release page), so nothing was re-vendored. Before: `5ffa482d…` = loader-c v2.0.0 (in this
   repo's v2.0.0); `f3af6143…` = loader-c v1.1.1 (= v1.1.0), SPEC 3.0.0, measured 2026-10-26;
   first copied 2026-06-19 from an unrecorded tag. On the next sync, re-stamp: the -c tag, the
   sha256, the date.
@@ -246,10 +249,38 @@ Bash `.sh` + Nushell `.nu` pairs). `-h`/`--help` prints each one's usage.
 2. **`scripts/release.ts`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`
    and `zig build test`, runs `compat.ts --release` (since 2026-10-26), tags `v<version>`, pushes
    branch + tag to `origin`, then **reads both back with `git ls-remote`** and refuses (exit 1)
-   unless the branch and the tag's peeled commit are HEAD. A GitHub Release page is printed as an
-   **OWNER ITEM** with its `releases/new?tag=` URL (and `--notes` to paste); `--no-release` omits
-   it. Idempotent (reuses a tag only if it points at HEAD). Does **not** touch Zigistry.
-   `--dry-run` / `--no-release` / `--no-build` / `--remote` / `--notes`.
+   unless the branch and the tag's peeled commit are HEAD. It then prints where to watch the
+   release workflow and the Release page CI makes (item 4); until 2026-11-09 it printed the page as
+   an owner item (`--notes` / `--no-release` are gone with that). Idempotent (reuses a tag only if
+   it points at HEAD). Does **not** touch Zigistry. `--dry-run` / `--no-build` / `--remote`.
+4. **`.github/workflows/release.yml`** (2026-11-09, workspace H32; owner: "they both need the CI
+   and release pages, not by hand") — on a pushed `v*` tag. Job **`checks`** (`windows-latest`,
+   because `build.zig` knows only the `x86_64-mingw` SDK; `contents: read`; tokenless clone of the
+   tag, which must be `github.sha` and equal `v` + `build.zig.zon`'s `.version`): installs Bun
+   1.4.4 and Zig 0.17.1 from their official zips and the wasmtime SDK through
+   `fetch-wasmtime.ts`, **each pinned by sha256**, with no `uses:` steps; then `zig build test`
+   (output must say `All N tests passed.`), `zig build run` (the three adder lines, exact),
+   `surface.ts --check`, `bun test scripts/`, `compat.ts --release`. Job **`release`**
+   (`ubuntu-latest`, `needs: checks`, the ONLY `contents: write`): installs the pinned Bun, fetches
+   the single file `scripts/github-release.ts` at `github.sha` from raw.githubusercontent.com (no
+   checkout, so no package code beside the write token, C30), and runs it. **`github-release.ts`**
+   (H32's order): the tag must exist on GitHub and peel (annotated followed) to the checked commit,
+   because `POST /releases` CREATES a missing tag; an existing Release = done, no write; else
+   `POST` with `generate_release_notes`, read back (published, not a draft), re-check the tag. Every
+   call has its own time limit (`RELEASE_TIMEOUT_MS`, default 30 s). No dispatch / backfill: only
+   tags pushed after the workflow landed get a page (owner: "only new tags will get release
+   pages"). **Tests:** `scripts/github-release.test.ts`, 13 cases against a `Bun.serve` mock that
+   records every request, so each refusal is also shown to write nothing. Inverted: tag-commit
+   check removed → its 2 tests red; existing-Release check removed → 1; time limit removed → 1;
+   post-write tag re-check removed → 1; missing-tag refusal removed → 1. (A first harness used
+   `Bun.spawnSync`, which blocked the mock in the same process: everything timed out — a harness
+   fault, now `Bun.spawn`.) The pins, measured 2026-11-09: Bun `bun-windows-x64.zip` `cd2c0fcc…`
+   and `bun-linux-x64.zip` `bf8ccbfb…` (Bun's `SHASUMS256.txt`; the Linux one = loader-go's pin);
+   Zig `b03f477a…` (ziglang.org's `index.json` = scoop's manifest); wasmtime 45.0.2 x86_64-mingw
+   `233ac3d1…` (measured; `fetch-wasmtime.ts` now checks `WASMTIME_SHA256` when set, a wrong
+   value refuses before extracting). Locally run: every `checks` shell line (version parse, the two
+   output greps) and the PowerShell download function (right sha → Bun 1.4.4 runs; wrong → refused).
+   **UNMEASURED on GitHub until the next tag run** — the first page's `author.login` is the proof.
 3. **`scripts/publish.ts`** — the deliberate Zigistry step, decoupled from `release.ts`, and it
    **changes nothing**. **Zigistry has no upload/CLI publish** ([help](https://zigistry.dev/help/)):
    a library is indexed by giving the GitHub repo the topic **`zig-package`** (a program would use
