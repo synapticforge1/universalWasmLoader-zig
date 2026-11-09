@@ -9,8 +9,9 @@ the reference JS loader [`@jrmarcum/universal-wasm-loader`](https://jsr.io/@jrma
 The hard parts (WIT parsing, Canonical ABI marshalling, `cabi_post` string returns, version pinning)
 live **once** in the C loader; this repo only adds a Zig-native call surface on top.
 
-- **Language / runtime:** Zig **0.16+** (`minimum_zig_version = "0.16.0"`), built on the
-  [wasmtime C API](https://docs.wasmtime.dev/c-api/) (v45.0.2) as the WASM engine.
+- **Language / runtime:** Zig **0.17.1** (`minimum_zig_version = "0.17.1"`, since 2026-11-08;
+  0.16.0 before), built on the [wasmtime C API](https://docs.wasmtime.dev/c-api/) (v45.0.2) as
+  the WASM engine. See "Zig 0.17.1 port" below for what moved.
 - **What it gives Zig callers:** error unions instead of out-params, native Zig argument/result types,
   and a **comptime-typed call site** (`m.call(i32, "add", .{3,4})`) — no manual `uwl_val_t` boxing.
 - **Distribution:** a Zig module (`build.zig.zon` name `universal_wasm_loader`, v1.0.0, MIT) exposing
@@ -37,8 +38,9 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
 
 Working tree:
 
-- `src/uwl.zig` — the binding (public API + comptime arg/result dispatch). Imports the C header via
-  `@cImport` and re-exports it as `uwl.c` (raw escape hatch).
+- `src/uwl.zig` — the binding (public API + comptime arg/result dispatch). Imports the C header as
+  the module `c` (translated by `build.zig`'s `addTranslateC`) and re-exports it as `uwl.c` (raw
+  escape hatch).
 - `src/uwl_impl.c` — 3-line TU that `#define UWL_IMPLEMENTATION` + includes the header to compile the
   loader body into the module.
 - `src/universal_wasm_loader.h` — **vendored copy** of the upstream C single-header loader. Keep in
@@ -83,6 +85,25 @@ Working tree:
 
 Build environment used for v1: Zig 0.16.0 + wasmtime C API **v45.0.2** `x86_64-mingw`.
 
+### Zig 0.17.1 port (2026-11-08, owner: "update this project to version 0.17.1 of zig")
+
+Measured on the host's `zig` 0.17.1 (scoop, on PATH since 2026-11-05). Five breaks, each a
+removed API, each fixed at its root (no shim):
+
+| 0.16 form | 0.17.1 form | Where |
+| --- | --- | --- |
+| `@cImport({ @cInclude(...) })` | `b.addTranslateC(.{ .root_source_file = header })` → module import `"c"` | `build.zig`, `src/uwl.zig` |
+| `b.args` + `run.addArgs` | `run.addPassthruArgs()` | `build.zig` (`run` step) |
+| `Step.Run.addPathDir(dir)` | env map: `run.getEnvMap()` + `setEnvironmentVariable("PATH", …)` (`prependPath`) | `build.zig` (`test`, `surface`) |
+| `b.pathFromRoot(p)` | `b.root.joinString(alloc, p)` | `build.zig` (`prependPath`) |
+| `@typeInfo` `.fields` / `.decls` / `.params` (records) | `field_names` + `field_types`, `decl_names`, `param_types`, `attrs.varargs` / `attrs.@"callconv"`, error set `.error_names`, enum `field_values` | `src/uwl.zig` (tuple args), `tools/surface.zig` |
+
+Two gate consequences, fixed in `tools/surface.zig` / `scripts/compat.ts` (see
+[compat-gate.md](compat-gate.md)): the translated header's namespace (`cimport.` under 0.16,
+`universal_wasm_loader.` under 0.17) leaked into 66 surface lines, now keyed as `c.`; and
+`v1.0.0`'s `src/` no longer builds (it uses `@cImport`), so its surface is not computable.
+Result: `zig build test` 11/11, `zig build run` the three adder lines, unchanged from 0.16.0.
+
 ## Public API surface (implemented)
 
 All in `src/uwl.zig`. Idiomatic Zig over the C loader's explicit `uwl_call` core (NOT the C variadic
@@ -100,7 +121,7 @@ convenience layer — argument types are checked at comptime on the Zig side ins
   `error.WrongResultType` if the export didn't return a `UWL_STR`.
 - **`m.deinit()`** — `uwl_free` + poisons the handle.
 - **`uwl.Error`** = `{ ImportFailed, CallFailed, WrongResultType, OutOfMemory }`.
-- **`uwl.c`** — the raw `@cImport` namespace (e.g. `uwl.c.uwl_last_error()` for the underlying
+- **`uwl.c`** — the raw translated-header namespace (e.g. `uwl.c.uwl_last_error()` for the underlying
   message). The escape hatch for raw (no-`.wit`) modules / anything not surfaced idiomatically.
 
 ### Arg/result marshalling (comptime)

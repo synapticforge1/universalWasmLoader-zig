@@ -18,9 +18,8 @@
 
 const std = @import("std");
 
-pub const c = @cImport({
-    @cInclude("universal_wasm_loader.h");
-});
+/// The raw C header, translated by `build.zig` (`addTranslateC`).
+pub const c = @import("c");
 
 pub const Error = error{
     ImportFailed,
@@ -43,8 +42,8 @@ fn toVal(v: anytype) c.uwl_val_t {
 
 /// Build a stack array of `uwl_val_t` from a tuple of native Zig args.
 fn buildArgs(args: anytype, out: []c.uwl_val_t) void {
-    const fields = @typeInfo(@TypeOf(args)).@"struct".fields;
-    inline for (fields, 0..) |f, i| out[i] = toVal(@field(args, f.name));
+    const names = @typeInfo(@TypeOf(args)).@"struct".field_names;
+    inline for (names, 0..) |n, i| out[i] = toVal(@field(args, n));
 }
 
 /// A loaded, ABI-translated WASM module.
@@ -72,13 +71,13 @@ pub const Module = struct {
     /// (`i32`/`i64`/`f32`/`f64`/`bool`/`void`). `args` is a tuple of native
     /// values, e.g. `.{ 3, 4 }`. For string results use `callStr`.
     pub fn call(self: Module, comptime T: type, name: [:0]const u8, args: anytype) Error!T {
-        const fields = @typeInfo(@TypeOf(args)).@"struct".fields;
-        var vals: [fields.len]c.uwl_val_t = undefined;
+        const names = @typeInfo(@TypeOf(args)).@"struct".field_names;
+        var vals: [names.len]c.uwl_val_t = undefined;
         buildArgs(args, &vals);
 
         var out: c.uwl_val_t = undefined;
         var err: [*c]u8 = null;
-        const rc = c.uwl_call(self.handle, name.ptr, &vals, fields.len, &out, &err);
+        const rc = c.uwl_call(self.handle, name.ptr, &vals, names.len, &out, &err);
         if (rc != 0) {
             if (err != null) c.uwl_string_free(err);
             return Error.CallFailed;
@@ -98,13 +97,13 @@ pub const Module = struct {
     /// Call a string-returning export. The result is copied into `allocator`
     /// and owned by the caller (free with `allocator.free`).
     pub fn callStr(self: Module, allocator: std.mem.Allocator, name: [:0]const u8, args: anytype) Error![]u8 {
-        const fields = @typeInfo(@TypeOf(args)).@"struct".fields;
-        var vals: [fields.len]c.uwl_val_t = undefined;
+        const names = @typeInfo(@TypeOf(args)).@"struct".field_names;
+        var vals: [names.len]c.uwl_val_t = undefined;
         buildArgs(args, &vals);
 
         var out: c.uwl_val_t = undefined;
         var err: [*c]u8 = null;
-        const rc = c.uwl_call(self.handle, name.ptr, &vals, fields.len, &out, &err);
+        const rc = c.uwl_call(self.handle, name.ptr, &vals, names.len, &out, &err);
         if (rc != 0) {
             if (err != null) c.uwl_string_free(err);
             return Error.CallFailed;

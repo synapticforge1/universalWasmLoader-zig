@@ -15,7 +15,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { die, help, readVersion, ROOT } from "./_lib.ts";
-import { diffSurface, generate, readSnapshot, type Surface } from "./surface.ts";
+import { diffSurface, generate, parse, readSnapshot, SNAPSHOT, type Surface } from "./surface.ts";
 
 export type Level = "patch" | "minor" | "major";
 export const LEVELS: Level[] = ["patch", "minor", "major"];
@@ -92,14 +92,40 @@ function extract(tag: string, paths: string[]): void {
   if (x.exitCode !== 0) throw new Error(`tar -xf failed: ${x.stderr.toString().trim()}`);
 }
 
-/** The surface of `tag`'s src/, built with today's tools/surface.zig. */
+/**
+ * The surface of `tag`: its committed api-surface.txt when it has one (the
+ * release gate refuses a stale snapshot, so at a tag it IS that tag's surface,
+ * whatever Zig built it); otherwise its src/ built with today's tools/surface.zig.
+ */
 export function surfaceAt(tag: string): Surface {
+  if (git(["ls-tree", "--name-only", tag, SNAPSHOT]).trim() !== "") {
+    return parse(git(["show", `${tag}:${SNAPSHOT}`]));
+  }
   try {
     extract(tag, ["src"]);
     return generate(".compat/src", git(["show", `${tag}:src/universal_wasm_loader.h`]));
   } finally {
     rmSync(COMPAT, { recursive: true, force: true });
   }
+}
+
+/**
+ * Rule 2 against `tag`. A tag with no snapshot whose src/ does not build on
+ * today's Zig (v1.0.0 uses `@cImport`, removed in Zig 0.17) has no computable
+ * surface: the floor is then MAJOR, erring high as the rest of the gate does.
+ */
+export function floorVs(tag: string, next: Surface): { floor: Level; reasons: string[] } {
+  let prev: Surface;
+  try {
+    prev = surfaceAt(tag);
+  } catch (e) {
+    const first = String(e instanceof Error ? e.message : e).split("\n")[0];
+    return {
+      floor: "major",
+      reasons: [`major: ${tag}'s surface is not computable (no ${SNAPSHOT} at the tag, and its src/ does not build on this Zig: ${first})`],
+    };
+  }
+  return floorOf(prev, next);
 }
 
 export type TestResult = { ok: boolean; none: boolean; passed: number; failed: number; exitCode: number; output: string };
@@ -176,7 +202,7 @@ if (import.meta.main) {
       process.exit(0);
     }
     const step = levelOf(prevTag, version);
-    const f = floorOf(surfaceAt(prevTag), snapshot);
+    const f = floorVs(prevTag, snapshot);
     console.log(`release ${version} is a ${step} step from ${prevTag}`);
     printFloor(prevTag, f);
     let ok = rank(step) >= rank(f.floor);
@@ -199,7 +225,7 @@ if (import.meta.main) {
     process.exit(0);
   }
   console.log(`version line: ${readVersion()}; last release tag: ${prevTag}`);
-  printFloor(prevTag, floorOf(surfaceAt(prevTag), snapshot));
+  printFloor(prevTag, floorVs(prevTag, snapshot));
   if (!noTests) {
     const r = previousTests(prevTag, keep);
     console.log(describeTests(prevTag, r));

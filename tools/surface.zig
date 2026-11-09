@@ -7,7 +7,7 @@
 //!   fn <name>: ...     a pub function's parameter types and return type
 //!   const <name>: ...  any other pub value (comptime integers with their value)
 //! The raw C layer (`uwl.c`) is surface too: every `uwl_` / `UWL_` name the
-//! @cImport exposes, keyed under `c.`. The SPEC version is added by
+//! translated header exposes, keyed under `c.`. The SPEC version is added by
 //! scripts/surface.ts, which reads it from the header's leading comment.
 //!
 //! A generic function's return type is invisible to reflection, so it prints as
@@ -35,11 +35,11 @@ pub fn main(init: std.process.Init) !void {
 fn collect() []const []const u8 {
     @setEvalBranchQuota(1_000_000);
     var lines: []const []const u8 = &.{};
-    for (@typeInfo(uwl).@"struct".decls) |d| {
-        if (std.mem.eql(u8, d.name, "c")) {
+    for (@typeInfo(uwl).@"struct".decl_names) |d| {
+        if (std.mem.eql(u8, d, "c")) {
             lines = lines ++ cLayer();
         } else {
-            lines = lines ++ describe(d.name, @field(uwl, d.name));
+            lines = lines ++ describe(d, @field(uwl, d));
         }
     }
     return lines;
@@ -48,9 +48,9 @@ fn collect() []const []const u8 {
 /// The raw C re-export, filtered to the loader's own names.
 fn cLayer() []const []const u8 {
     var lines: []const []const u8 = &.{};
-    for (@typeInfo(uwl.c).@"struct".decls) |d| {
-        if (!std.mem.startsWith(u8, d.name, "uwl_") and !std.mem.startsWith(u8, d.name, "UWL_")) continue;
-        lines = lines ++ describe("c." ++ d.name, @field(uwl.c, d.name));
+    for (@typeInfo(uwl.c).@"struct".decl_names) |d| {
+        if (!std.mem.startsWith(u8, d, "uwl_") and !std.mem.startsWith(u8, d, "UWL_")) continue;
+        lines = lines ++ describe("c." ++ d, @field(uwl.c, d));
     }
     return lines;
 }
@@ -60,8 +60,8 @@ fn describe(comptime name: []const u8, comptime value: anytype) []const []const 
     if (T == type) return describeType(name, value);
     return switch (@typeInfo(T)) {
         .@"fn" => &.{"fn " ++ name ++ ": " ++ fnSig(T)},
-        .int, .comptime_int => &.{std.fmt.comptimePrint("const {s}: {s} = {d}", .{ name, @typeName(T), value })},
-        else => &.{"const " ++ name ++ ": " ++ @typeName(T)},
+        .int, .comptime_int => &.{std.fmt.comptimePrint("const {s}: {s} = {d}", .{ name, typeName(T), value })},
+        else => &.{"const " ++ name ++ ": " ++ typeName(T)},
     };
 }
 
@@ -69,9 +69,9 @@ fn describeType(comptime name: []const u8, comptime T: type) []const []const u8 
     switch (@typeInfo(T)) {
         .error_set => |set| {
             // Sorted: the declaration order is not part of the contract.
-            const errs = set orelse @compileError("cannot key an inferred error set: " ++ name);
+            const errs = set.error_names orelse @compileError("cannot key an inferred error set: " ++ name);
             var sorted: [errs.len][]const u8 = undefined;
-            for (errs, 0..) |e, i| sorted[i] = e.name;
+            for (errs, 0..) |e, i| sorted[i] = e;
             std.mem.sort([]const u8, &sorted, {}, struct {
                 fn lessThan(_: void, a: []const u8, b: []const u8) bool {
                     return std.mem.order(u8, a, b) == .lt;
@@ -83,28 +83,51 @@ fn describeType(comptime name: []const u8, comptime T: type) []const []const u8 
         },
         .@"struct" => |s| {
             var lines: []const []const u8 = &.{"type " ++ name ++ " = struct" ++ layout(s.layout)};
-            for (s.fields) |f| {
-                lines = lines ++ .{"field " ++ name ++ "." ++ f.name ++ ": " ++ @typeName(f.type)};
+            for (s.field_names, s.field_types) |f, ft| {
+                lines = lines ++ .{"field " ++ name ++ "." ++ f ++ ": " ++ typeName(ft)};
                 // An anonymous C union (uwl_val.as) is layout; key its members too.
-                if (@typeInfo(f.type) == .@"union") {
-                    for (@typeInfo(f.type).@"union".fields) |u| {
-                        lines = lines ++ .{"field " ++ name ++ "." ++ f.name ++ "." ++ u.name ++ ": " ++ @typeName(u.type)};
+                if (@typeInfo(ft) == .@"union") {
+                    const u = @typeInfo(ft).@"union";
+                    for (u.field_names, u.field_types) |un, ut| {
+                        lines = lines ++ .{"field " ++ name ++ "." ++ f ++ "." ++ un ++ ": " ++ typeName(ut)};
                     }
                 }
             }
-            for (s.decls) |d| lines = lines ++ describe(name ++ "." ++ d.name, @field(T, d.name));
+            for (s.decl_names) |d| lines = lines ++ describe(name ++ "." ++ d, @field(T, d));
             return lines;
         },
         .@"enum" => |e| {
-            var lines: []const []const u8 = &.{"type " ++ name ++ " = enum(" ++ @typeName(e.tag_type) ++ ")"};
-            for (e.fields) |f| lines = lines ++ .{std.fmt.comptimePrint("tag {s}.{s} = {d}", .{ name, f.name, f.value })};
+            var lines: []const []const u8 = &.{"type " ++ name ++ " = enum(" ++ typeName(e.tag_type) ++ ")"};
+            for (e.field_names, e.field_values) |f, v| lines = lines ++ .{std.fmt.comptimePrint("tag {s}.{s} = {d}", .{ name, f, v })};
             return lines;
         },
         .@"opaque" => return &.{"type " ++ name ++ " = opaque"},
         // Pointers, ints, floats, optionals: the C typedefs' aliases (fn pointers included).
-        .pointer, .int, .float, .optional, .bool => return &.{"type " ++ name ++ " = " ++ @typeName(T)},
-        else => @compileError("cannot key type " ++ name ++ ": " ++ @typeName(T)),
+        .pointer, .int, .float, .optional, .bool => return &.{"type " ++ name ++ " = " ++ typeName(T)},
+        else => @compileError("cannot key type " ++ name ++ ": " ++ typeName(T)),
     }
+}
+
+/// `@typeName`, with the translated header's namespace keyed as `c.`. That
+/// prefix is the build's name for the header module (`cimport.` under Zig
+/// 0.16's `@cImport`, `universal_wasm_loader.` under 0.17's `addTranslateC`),
+/// not part of the API, so it must not move the surface.
+fn typeName(comptime T: type) []const u8 {
+    const full = @typeName(T);
+    const ns = @typeName(uwl.c) ++ ".";
+    var out: []const u8 = "";
+    var i: usize = 0;
+    while (i < full.len) {
+        const at_word = i == 0 or !(std.ascii.isAlphanumeric(full[i - 1]) or full[i - 1] == '_');
+        if (at_word and std.mem.startsWith(u8, full[i..], ns)) {
+            out = out ++ "c.";
+            i += ns.len;
+        } else {
+            out = out ++ full[i .. i + 1];
+            i += 1;
+        }
+    }
+    return out;
 }
 
 fn layout(comptime l: std.builtin.Type.ContainerLayout) []const u8 {
@@ -118,15 +141,17 @@ fn layout(comptime l: std.builtin.Type.ContainerLayout) []const u8 {
 fn fnSig(comptime F: type) []const u8 {
     const f = @typeInfo(F).@"fn";
     var s: []const u8 = "fn(";
-    for (f.params, 0..) |p, i| {
+    // Zig 0.17 reflects a parameter as its type only (null = `anytype`).
+    for (f.param_types, 0..) |p, i| {
         if (i > 0) s = s ++ ", ";
-        s = s ++ if (p.type) |t| (if (p.is_generic) "comptime " else "") ++ @typeName(t) else "anytype";
+        s = s ++ if (p) |t| typeName(t) else "anytype";
     }
     s = s ++ ")";
-    if (f.is_var_args) s = s ++ " varargs";
+    if (f.attrs.varargs) s = s ++ " varargs";
     // The C convention's tag names the target (x86_64_win, …); key it as `c`
     // so the surface is the same on every platform.
-    const cc = if (std.meta.eql(f.calling_convention, std.builtin.CallingConvention.c)) "c" else @tagName(f.calling_convention);
+    const cconv = f.attrs.@"callconv";
+    const cc = if (std.meta.eql(cconv, std.builtin.CallingConvention.c)) "c" else @tagName(cconv);
     s = s ++ " " ++ cc ++ " ";
-    return s ++ if (f.return_type) |r| @typeName(r) else "generic";
+    return s ++ if (f.return_type) |r| typeName(r) else "generic";
 }

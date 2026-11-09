@@ -15,13 +15,12 @@ import {
 import {
   currentSurface,
   describeTests,
-  floorOf,
+  floorVs,
   levelOf,
   previousTests,
   printFloor,
   rank,
   releaseTags,
-  surfaceAt,
 } from "./compat.ts";
 
 const USAGE = `
@@ -98,7 +97,7 @@ if (lastTag) {
     die(`the version line (${cur}) is not the last release tag (${lastTag}); a bump starts from a released version.`);
   }
   const step = levelOf(cur, next);
-  const f = floorOf(surfaceAt(lastTag), currentSurface());
+  const f = floorVs(lastTag, currentSurface());
   printFloor(lastTag, f);
   if (rank(step) < rank(f.floor)) die(`a ${step} bump is below the floor (${f.floor}).`);
   if (step !== "major") {

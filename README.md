@@ -67,7 +67,8 @@ Zig's `lld` does not provide. `zig build` ships `wasmtime.dll` next to the binar
 
 ## Requirements & notes
 
-- **Zig 0.16+**, and a vendored wasmtime SDK (via `bun scripts/fetch-wasmtime.ts`;
+- **Zig 0.17.1+** (the build uses Zig 0.17's `addTranslateC` for the C header,
+  so Zig 0.16 no longer builds it), and a vendored wasmtime SDK (via `bun scripts/fetch-wasmtime.ts`;
   the repo's scripts need only [Bun](https://bun.sh)).
 - The vendored C loader header lives at `src/universal_wasm_loader.h`; keep it in
   sync with the upstream [`universalWasmLoader-c`](https://github.com/synapticforge1/universalWasmLoader-c)

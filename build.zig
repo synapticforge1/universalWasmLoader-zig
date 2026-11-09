@@ -11,6 +11,19 @@ const win_syslibs = [_][]const u8{
     "Shlwapi", "advapi32", "kernel32", "uuid",
 };
 
+/// Prepend `sub_path` (relative to the build root) to the run's PATH so the
+/// OS loader finds wasmtime.dll. Zig 0.17 removed `Step.Run.addPathDir` and
+/// `Build.pathFromRoot`; the env map is cloned from the build's environment on
+/// first use, and its lookups ignore case on Windows.
+fn prependPath(run: *std.Build.Step.Run, sub_path: []const u8) void {
+    const b = run.step.owner;
+    const dir = b.root.joinString(b.allocator, sub_path) catch @panic("OOM");
+    const env = run.getEnvMap();
+    const sep: []const u8 = if (@import("builtin").os.tag == .windows) ";" else ":";
+    const value = if (env.get("PATH")) |old| b.fmt("{s}{s}{s}", .{ dir, sep, old }) else dir;
+    run.setEnvironmentVariable("PATH", value);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -25,11 +38,21 @@ pub fn build(b: *std.Build) void {
     const test_root = b.option([]const u8, "test-root", "Test suite root file (default: tests/uwl_test.zig)") orelse "tests/uwl_test.zig";
     const test_cwd = b.option([]const u8, "test-cwd", "Directory the test suite runs in (default: the repo root)") orelse ".";
 
+    // The C header, translated by the build (Zig 0.17 removed `@cImport`);
+    // src/uwl.zig imports it as "c" and re-exports it as `uwl.c`.
+    const c_header = b.addTranslateC(.{
+        .root_source_file = b.path(b.pathJoin(&.{ src_dir, "universal_wasm_loader.h" })),
+        .target = target,
+        .optimize = optimize,
+    });
+    c_header.addIncludePath(wt_inc);
+
     const uwl_mod = b.addModule("uwl", .{
         .root_source_file = b.path(b.pathJoin(&.{ src_dir, "uwl.zig" })),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
+        .imports = &.{.{ .name = "c", .module = c_header.createModule() }},
     });
     uwl_mod.addIncludePath(b.path(src_dir)); // vendored universal_wasm_loader.h
     uwl_mod.addIncludePath(wt_inc);
@@ -58,7 +81,7 @@ pub fn build(b: *std.Build) void {
 
     const run = b.addRunArtifact(exe);
     run.step.dependOn(&stage_dll.step);
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs(); // `zig build run -- <args>` (Zig 0.17: replaces `b.args`)
     const run_step = b.step("run", "Run the adder example");
     run_step.dependOn(&run.step);
 
@@ -80,7 +103,7 @@ pub fn build(b: *std.Build) void {
     run_tests.addArtifactArg(tests);
     run_tests.setCwd(b.path(test_cwd));
     // A cwd other than the repo root has no staged wasmtime.dll; PATH finds it.
-    run_tests.addPathDir(b.pathFromRoot(b.pathJoin(&.{ wasmtime_dir, "lib" })));
+    prependPath(run_tests, b.pathJoin(&.{ wasmtime_dir, "lib" }));
     run_tests.step.dependOn(&stage_dll.step);
     const test_step = b.step("test", "Run the reference test suite");
     test_step.dependOn(&run_tests.step);
@@ -97,7 +120,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_surface = b.addRunArtifact(surface_tool);
-    run_surface.addPathDir(b.pathFromRoot(b.pathJoin(&.{ wasmtime_dir, "lib" })));
+    prependPath(run_surface, b.pathJoin(&.{ wasmtime_dir, "lib" }));
     const surface_step = b.step("surface", "Print the public API surface");
     surface_step.dependOn(&run_surface.step);
 }

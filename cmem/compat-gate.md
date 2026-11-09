@@ -18,7 +18,7 @@ The floor and previous-tag logic follow loader-c's `scripts/compat.ts`
 **The surface** is read by REFLECTION over the compiled `uwl` module (`@typeInfo`), not by parsing
 source text, so it is what a Zig consumer actually sees: every pub decl of `uwl` (error-set members
 sorted, struct fields, functions as parameter types + calling convention + return type), and the
-raw C layer `uwl.c` — every `uwl_` / `UWL_` name the @cImport exposes, constants with their integer
+raw C layer `uwl.c` — every `uwl_` / `UWL_` name the translated header exposes, constants with their integer
 VALUE (C integers are frozen), struct layouts including the anonymous `uwl_val.as` union. The C
 calling convention is keyed as `c`, so the surface is the same on every target. `surface.ts` adds
 the SPEC version from the header's leading comment (exactly once, as -c reads it). A form the tool
@@ -30,11 +30,24 @@ Rule 3 is what sees a change there.
 by its own level (lowered → major). A changed signature is major even when it only widens (errs
 high, as -c and -js).
 
-**A previous tag's surface** is built from that tag's `src/` (`git archive` into `.compat/`,
-gitignored, deleted after) with TODAY's `tools/surface.zig`, through `build.zig`'s `-Dsrc=`.
+**A previous tag's surface** (since 2026-11-08) is that tag's committed `api-surface.txt` when
+it has one — the release gate refuses a stale snapshot, so at a tag the snapshot IS the surface,
+whatever Zig built it. A tag without one is built from its `src/` (`git archive` into `.compat/`,
+gitignored, deleted after) with TODAY's `tools/surface.zig`, through `build.zig`'s `-Dsrc=`; if
+that `src/` does not build on today's Zig, `floorVs` returns floor **major** with the reason
+(erring high). That is `v1.0.0` since the Zig 0.17.1 port: its `src/uwl.zig` uses `@cImport`,
+removed in 0.17. So the first release after `v1.0.0` must be a major — which SPEC 4.0.0 (ledger
+C29) makes it anyway.
 **Its tests** run the same way through `-Dtest-root=` / `-Dtest-cwd=` (fixtures travel with the
-suite; `wasmtime.dll` is found through PATH via `addPathDir`). The verdict is read from the OUTPUT
-(`All N tests passed.` / `N passed; M skipped; K failed.`) and the exit code.
+suite; `wasmtime.dll` is found through PATH, which `build.zig`'s `prependPath` sets). The verdict
+is read from the OUTPUT (`All N tests passed.` / `N passed; M skipped; K failed.`) and the exit
+code.
+
+**Toolchain-stable keys (2026-11-08):** the translated header's namespace is the BUILD's name for
+the header module (`cimport.` under Zig 0.16's `@cImport`, `universal_wasm_loader.` under 0.17's
+`addTranslateC`), not API; `tools/surface.zig`'s `typeName` keys it as `c.`. The 0.17.1 port's
+re-baseline changed exactly those 66 lines and nothing else (measured: with `cimport.` → `c.`
+applied to the old snapshot, every line equal).
 
 **The version line** is `build.zig.zon` `.version`; `bump-version.ts` refuses unless it equals the
 last release tag. **`v1.0.0` has no tests**, so the first bump after it prints `NOTHING TO RUN (Rule
