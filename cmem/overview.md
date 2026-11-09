@@ -266,8 +266,15 @@ with `ZIG_LOCAL_CACHE_DIR` pointed at a NEW empty directory, so its "cold-cache"
 cold (it only deletes the repo's own `.zig-cache`, which an NTFS cache dir bypasses). **`gh` is not
 installed on the build host (2026-11-08: not on PATH in Bash or PowerShell)**, so `release.ts`
 pushes the tag and skips the GitHub Release with a warning; the Release and the Zigistry topic
-(`publish.ts`, needs `gh`) stay owner items. The release record (tag id, `ls-remote` read-back)
-is in the memory commit after the tag.
+(`publish.ts`, needs `gh`) stay owner items. **Released 2026-11-08:** bump `c647164` (its
+message is the script's, without the co-author line); `release.ts` exit 0 — cold build on a new
+cache dir: the three adder lines, `All 23 tests passed.`, `compat --release` major step vs floor
+major. Annotated tag **`v2.0.0`** = object `932b94c` → commit **`c647164`**. Read back with
+`git ls-remote origin`: `refs/heads/main` = `refs/tags/v2.0.0^{}` = `c647164`; `origin/main`'s
+`build.zig.zon` says `2.0.0`; the tag's source tarball answers HTTP 200, and `zig fetch` of it
+(Zig 0.17.1) gives the package hash
+`universal_wasm_loader-2.0.0-kwfgauDsAQB_yLRu7NqzpGuKdXu9FRj8mTy91DtmyO_g`. GitHub Release:
+not created (no `gh`). Zigistry: the `zig-package` topic is unchecked here (needs `gh`).
 
 ## Known gaps / not yet done
 
