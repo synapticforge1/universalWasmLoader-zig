@@ -8,11 +8,11 @@ const c.UWL_I32: c_int = 1
 const c.UWL_I64: c_int = 2
 const c.UWL_STR: c_int = 6
 const c.UWL_VOID: c_int = 0
-field Module.handle: *cimport.struct_uwl_module
-field c.uwl_host_callback.fn: ?*const fn ([*c]const cimport.struct_uwl_val, usize, ?*anyopaque) callconv(.c) cimport.struct_uwl_val
+field Module.handle: *c.struct_uwl_module
+field c.uwl_host_callback.fn: ?*const fn ([*c]const c.struct_uwl_val, usize, ?*anyopaque) callconv(.c) c.struct_uwl_val
 field c.uwl_host_callback.name: [*c]const u8
 field c.uwl_host_callback.userdata: ?*anyopaque
-field c.uwl_host_callback_t.fn: ?*const fn ([*c]const cimport.struct_uwl_val, usize, ?*anyopaque) callconv(.c) cimport.struct_uwl_val
+field c.uwl_host_callback_t.fn: ?*const fn ([*c]const c.struct_uwl_val, usize, ?*anyopaque) callconv(.c) c.struct_uwl_val
 field c.uwl_host_callback_t.name: [*c]const u8
 field c.uwl_host_callback_t.userdata: ?*anyopaque
 field c.uwl_val.as.b: c_int
@@ -20,7 +20,7 @@ field c.uwl_val.as.f32: f32
 field c.uwl_val.as.f64: f64
 field c.uwl_val.as.i32: i32
 field c.uwl_val.as.i64: i64
-field c.uwl_val.as: cimport.union_unnamed_1
+field c.uwl_val.as: c.union_unnamed_1
 field c.uwl_val.kind: c_uint
 field c.uwl_val.len: usize
 field c.uwl_val.str: [*c]u8
@@ -29,7 +29,7 @@ field c.uwl_val_t.as.f32: f32
 field c.uwl_val_t.as.f64: f64
 field c.uwl_val_t.as.i32: i32
 field c.uwl_val_t.as.i64: i64
-field c.uwl_val_t.as: cimport.union_unnamed_1
+field c.uwl_val_t.as: c.union_unnamed_1
 field c.uwl_val_t.kind: c_uint
 field c.uwl_val_t.len: usize
 field c.uwl_val_t.str: [*c]u8
@@ -37,73 +37,73 @@ fn Module.call: fn(uwl.Module, type, [:0]const u8, anytype) auto generic
 fn Module.callStr: fn(uwl.Module, mem.Allocator, [:0]const u8, anytype) auto error{CallFailed,ImportFailed,OutOfMemory,WrongResultType}![]u8
 fn Module.deinit: fn(*uwl.Module) auto void
 fn Module.import: fn([:0]const u8) auto error{CallFailed,ImportFailed,OutOfMemory,WrongResultType}!uwl.Module
-fn c.uwl_as_bool: fn(cimport.struct_uwl_val) c c_int
-fn c.uwl_as_f32: fn(cimport.struct_uwl_val) c f32
-fn c.uwl_as_f64: fn(cimport.struct_uwl_val) c f64
-fn c.uwl_as_i32: fn(cimport.struct_uwl_val) c i32
-fn c.uwl_as_i64: fn(cimport.struct_uwl_val) c i64
-fn c.uwl_as_str: fn(cimport.struct_uwl_val) c [*c]const u8
-fn c.uwl_bool: fn(c_int) c cimport.struct_uwl_val
-fn c.uwl_call: fn(?*cimport.struct_uwl_module, [*c]const u8, [*c]const cimport.struct_uwl_val, usize, [*c]cimport.struct_uwl_val, [*c][*c]u8) c c_int
-fn c.uwl_call_bool: fn(?*cimport.struct_uwl_module, [*c]const u8) varargs c c_int
-fn c.uwl_call_f32: fn(?*cimport.struct_uwl_module, [*c]const u8) varargs c f32
-fn c.uwl_call_f64: fn(?*cimport.struct_uwl_module, [*c]const u8) varargs c f64
-fn c.uwl_call_i32: fn(?*cimport.struct_uwl_module, [*c]const u8) varargs c i32
-fn c.uwl_call_i64: fn(?*cimport.struct_uwl_module, [*c]const u8) varargs c i64
-fn c.uwl_call_str: fn(?*cimport.struct_uwl_module, [*c]const u8) varargs c [*c]u8
-fn c.uwl_call_void: fn(?*cimport.struct_uwl_module, [*c]const u8) varargs c void
-fn c.uwl_f32: fn(f32) c cimport.struct_uwl_val
-fn c.uwl_f64: fn(f64) c cimport.struct_uwl_val
-fn c.uwl_free: fn(?*cimport.struct_uwl_module) c void
-fn c.uwl_i32: fn(i32) c cimport.struct_uwl_val
-fn c.uwl_i64: fn(i64) c cimport.struct_uwl_val
-fn c.uwl_import: fn([*c]const u8, [*c]const cimport.struct_uwl_host_callback, usize, [*c][*c]u8) c ?*cimport.struct_uwl_module
+fn c.uwl_as_bool: fn(c.struct_uwl_val) c c_int
+fn c.uwl_as_f32: fn(c.struct_uwl_val) c f32
+fn c.uwl_as_f64: fn(c.struct_uwl_val) c f64
+fn c.uwl_as_i32: fn(c.struct_uwl_val) c i32
+fn c.uwl_as_i64: fn(c.struct_uwl_val) c i64
+fn c.uwl_as_str: fn(c.struct_uwl_val) c [*c]const u8
+fn c.uwl_bool: fn(c_int) c c.struct_uwl_val
+fn c.uwl_call: fn(?*c.struct_uwl_module, [*c]const u8, [*c]const c.struct_uwl_val, usize, [*c]c.struct_uwl_val, [*c][*c]u8) c c_int
+fn c.uwl_call_bool: fn(?*c.struct_uwl_module, [*c]const u8) varargs c c_int
+fn c.uwl_call_f32: fn(?*c.struct_uwl_module, [*c]const u8) varargs c f32
+fn c.uwl_call_f64: fn(?*c.struct_uwl_module, [*c]const u8) varargs c f64
+fn c.uwl_call_i32: fn(?*c.struct_uwl_module, [*c]const u8) varargs c i32
+fn c.uwl_call_i64: fn(?*c.struct_uwl_module, [*c]const u8) varargs c i64
+fn c.uwl_call_str: fn(?*c.struct_uwl_module, [*c]const u8) varargs c [*c]u8
+fn c.uwl_call_void: fn(?*c.struct_uwl_module, [*c]const u8) varargs c void
+fn c.uwl_f32: fn(f32) c c.struct_uwl_val
+fn c.uwl_f64: fn(f64) c c.struct_uwl_val
+fn c.uwl_free: fn(?*c.struct_uwl_module) c void
+fn c.uwl_i32: fn(i32) c c.struct_uwl_val
+fn c.uwl_i64: fn(i64) c c.struct_uwl_val
+fn c.uwl_import: fn([*c]const u8, [*c]const c.struct_uwl_host_callback, usize, [*c][*c]u8) c ?*c.struct_uwl_module
 fn c.uwl_last_error: fn() c [*c]const u8
-fn c.uwl_pool_acquire: fn(?*cimport.struct_uwl_pool, [*c][*c]u8) c ?*cimport.struct_uwl_module
-fn c.uwl_pool_available: fn(?*const cimport.struct_uwl_pool) c usize
-fn c.uwl_pool_free: fn(?*cimport.struct_uwl_pool) c void
-fn c.uwl_pool_new: fn([*c]const u8, [*c]const cimport.struct_uwl_host_callback, usize, usize, [*c][*c]u8) c ?*cimport.struct_uwl_pool
-fn c.uwl_pool_release: fn(?*cimport.struct_uwl_pool, ?*cimport.struct_uwl_module) c void
-fn c.uwl_pool_size: fn(?*const cimport.struct_uwl_pool) c usize
-fn c.uwl_singleton_free: fn(?*cimport.struct_uwl_singleton) c void
-fn c.uwl_singleton_get: fn(?*cimport.struct_uwl_singleton, [*c][*c]u8) c ?*cimport.struct_uwl_module
-fn c.uwl_singleton_new: fn([*c]const u8, [*c]const cimport.struct_uwl_host_callback, usize) c ?*cimport.struct_uwl_singleton
-fn c.uwl_str: fn([*c]const u8) c cimport.struct_uwl_val
+fn c.uwl_pool_acquire: fn(?*c.struct_uwl_pool, [*c][*c]u8) c ?*c.struct_uwl_module
+fn c.uwl_pool_available: fn(?*const c.struct_uwl_pool) c usize
+fn c.uwl_pool_free: fn(?*c.struct_uwl_pool) c void
+fn c.uwl_pool_new: fn([*c]const u8, [*c]const c.struct_uwl_host_callback, usize, usize, [*c][*c]u8) c ?*c.struct_uwl_pool
+fn c.uwl_pool_release: fn(?*c.struct_uwl_pool, ?*c.struct_uwl_module) c void
+fn c.uwl_pool_size: fn(?*const c.struct_uwl_pool) c usize
+fn c.uwl_singleton_free: fn(?*c.struct_uwl_singleton) c void
+fn c.uwl_singleton_get: fn(?*c.struct_uwl_singleton, [*c][*c]u8) c ?*c.struct_uwl_module
+fn c.uwl_singleton_new: fn([*c]const u8, [*c]const c.struct_uwl_host_callback, usize) c ?*c.struct_uwl_singleton
+fn c.uwl_str: fn([*c]const u8) c c.struct_uwl_val
 fn c.uwl_string_free: fn([*c]u8) c void
-fn c.uwl_strn: fn([*c]const u8, usize) c cimport.struct_uwl_val
-fn c.uwl_val.bool: fn(cimport.struct_uwl_val) c c_int
-fn c.uwl_val.f32: fn(cimport.struct_uwl_val) c f32
-fn c.uwl_val.f64: fn(cimport.struct_uwl_val) c f64
-fn c.uwl_val.free: fn([*c]cimport.struct_uwl_val) c void
-fn c.uwl_val.i32: fn(cimport.struct_uwl_val) c i32
-fn c.uwl_val.i64: fn(cimport.struct_uwl_val) c i64
-fn c.uwl_val.uwl_as_bool: fn(cimport.struct_uwl_val) c c_int
-fn c.uwl_val.uwl_as_f32: fn(cimport.struct_uwl_val) c f32
-fn c.uwl_val.uwl_as_f64: fn(cimport.struct_uwl_val) c f64
-fn c.uwl_val.uwl_as_i32: fn(cimport.struct_uwl_val) c i32
-fn c.uwl_val.uwl_as_i64: fn(cimport.struct_uwl_val) c i64
-fn c.uwl_val.uwl_as_str: fn(cimport.struct_uwl_val) c [*c]const u8
-fn c.uwl_val.uwl_val_free: fn([*c]cimport.struct_uwl_val) c void
-fn c.uwl_val_free: fn([*c]cimport.struct_uwl_val) c void
-fn c.uwl_val_t.bool: fn(cimport.struct_uwl_val) c c_int
-fn c.uwl_val_t.f32: fn(cimport.struct_uwl_val) c f32
-fn c.uwl_val_t.f64: fn(cimport.struct_uwl_val) c f64
-fn c.uwl_val_t.free: fn([*c]cimport.struct_uwl_val) c void
-fn c.uwl_val_t.i32: fn(cimport.struct_uwl_val) c i32
-fn c.uwl_val_t.i64: fn(cimport.struct_uwl_val) c i64
-fn c.uwl_val_t.uwl_as_bool: fn(cimport.struct_uwl_val) c c_int
-fn c.uwl_val_t.uwl_as_f32: fn(cimport.struct_uwl_val) c f32
-fn c.uwl_val_t.uwl_as_f64: fn(cimport.struct_uwl_val) c f64
-fn c.uwl_val_t.uwl_as_i32: fn(cimport.struct_uwl_val) c i32
-fn c.uwl_val_t.uwl_as_i64: fn(cimport.struct_uwl_val) c i64
-fn c.uwl_val_t.uwl_as_str: fn(cimport.struct_uwl_val) c [*c]const u8
-fn c.uwl_val_t.uwl_val_free: fn([*c]cimport.struct_uwl_val) c void
-fn c.uwl_void: fn() c cimport.struct_uwl_val
+fn c.uwl_strn: fn([*c]const u8, usize) c c.struct_uwl_val
+fn c.uwl_val.bool: fn(c.struct_uwl_val) c c_int
+fn c.uwl_val.f32: fn(c.struct_uwl_val) c f32
+fn c.uwl_val.f64: fn(c.struct_uwl_val) c f64
+fn c.uwl_val.free: fn([*c]c.struct_uwl_val) c void
+fn c.uwl_val.i32: fn(c.struct_uwl_val) c i32
+fn c.uwl_val.i64: fn(c.struct_uwl_val) c i64
+fn c.uwl_val.uwl_as_bool: fn(c.struct_uwl_val) c c_int
+fn c.uwl_val.uwl_as_f32: fn(c.struct_uwl_val) c f32
+fn c.uwl_val.uwl_as_f64: fn(c.struct_uwl_val) c f64
+fn c.uwl_val.uwl_as_i32: fn(c.struct_uwl_val) c i32
+fn c.uwl_val.uwl_as_i64: fn(c.struct_uwl_val) c i64
+fn c.uwl_val.uwl_as_str: fn(c.struct_uwl_val) c [*c]const u8
+fn c.uwl_val.uwl_val_free: fn([*c]c.struct_uwl_val) c void
+fn c.uwl_val_free: fn([*c]c.struct_uwl_val) c void
+fn c.uwl_val_t.bool: fn(c.struct_uwl_val) c c_int
+fn c.uwl_val_t.f32: fn(c.struct_uwl_val) c f32
+fn c.uwl_val_t.f64: fn(c.struct_uwl_val) c f64
+fn c.uwl_val_t.free: fn([*c]c.struct_uwl_val) c void
+fn c.uwl_val_t.i32: fn(c.struct_uwl_val) c i32
+fn c.uwl_val_t.i64: fn(c.struct_uwl_val) c i64
+fn c.uwl_val_t.uwl_as_bool: fn(c.struct_uwl_val) c c_int
+fn c.uwl_val_t.uwl_as_f32: fn(c.struct_uwl_val) c f32
+fn c.uwl_val_t.uwl_as_f64: fn(c.struct_uwl_val) c f64
+fn c.uwl_val_t.uwl_as_i32: fn(c.struct_uwl_val) c i32
+fn c.uwl_val_t.uwl_as_i64: fn(c.struct_uwl_val) c i64
+fn c.uwl_val_t.uwl_as_str: fn(c.struct_uwl_val) c [*c]const u8
+fn c.uwl_val_t.uwl_val_free: fn([*c]c.struct_uwl_val) c void
+fn c.uwl_void: fn() c c.struct_uwl_val
 type Error = error{CallFailed,ImportFailed,OutOfMemory,WrongResultType}
 type Module = struct
 type c.uwl_host_callback = struct extern
 type c.uwl_host_callback_t = struct extern
-type c.uwl_host_fn_t = ?*const fn ([*c]const cimport.struct_uwl_val, usize, ?*anyopaque) callconv(.c) cimport.struct_uwl_val
+type c.uwl_host_fn_t = ?*const fn ([*c]const c.struct_uwl_val, usize, ?*anyopaque) callconv(.c) c.struct_uwl_val
 type c.uwl_kind_t = c_uint
 type c.uwl_module = opaque
 type c.uwl_module_t = opaque
