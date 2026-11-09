@@ -119,7 +119,8 @@ export function floorVs(tag: string, next: Surface): { floor: Level; reasons: st
   try {
     prev = surfaceAt(tag);
   } catch (e) {
-    const first = String(e instanceof Error ? e.message : e).split("\n")[0];
+    const lines = String(e instanceof Error ? e.message : e).split("\n");
+    const first = (lines.find((l) => /error: /.test(l)) ?? lines[0]).trim();
     return {
       floor: "major",
       reasons: [`major: ${tag}'s surface is not computable (no ${SNAPSHOT} at the tag, and its src/ does not build on this Zig: ${first})`],
