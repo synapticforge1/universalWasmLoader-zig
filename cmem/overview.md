@@ -300,6 +300,20 @@ major. Annotated tag **`v2.0.0`** = object `932b94c` → commit **`c647164`**. R
 `zig-package` topic (GitHub's API, 2026-11-08: no topics set) — `bun scripts/publish.ts`
 re-checks and prints it.
 
+**v2.1.0 (2026-11-09, owner: "update the project memory files, commit, bump, push and release"):**
+memory `1026798`; `bump-version.ts minor` → `fdffe9f` (gate: floor minor, `added: const
+c.UWL_ERR`, `added: fn c.uwl_err`; v2.0.0's 23 tests green on the new src); then `4a198dc` fixed
+`bump-version.ts`'s help and "Next:" line, which still said `release.ts` creates the GitHub
+Release. `release.ts` on a NEW empty cache dir, exit 0: the three adder lines, `All 25 tests
+passed.`, `compat --release` minor step vs floor minor, previous-tag tests GREEN 23 / 0. Annotated
+tag **`v2.1.0`** = object `93267f5` → commit **`4a198dc`**. The first release through the
+H30 `release.ts`: its own read-back printed `main = v2.1.0^{} = 4a198dc`. Re-read after: `git
+ls-remote` gives the same; `origin/main`'s `build.zig.zon` says `2.1.0`; `git grep -w gh
+origin/main -- scripts` → nothing; the tag's tarball answers HTTP 200; `zig fetch` (Zig 0.17.1)
+gives `universal_wasm_loader-2.1.0-kwfgarYFAgA-W5Whn_YYPHuk_A3ZJHl-G8DT_JyzNZlr`. **Owner items
+(web UI), open:** the optional Release pages for `v2.0.0` and `v2.1.0`
+(`…/releases/new?tag=v2.1.0`), and the `zig-package` topic.
+
 ## Known gaps / not yet done
 
 - **No CI.** `zig build test` (since 2026-10-26) runs by hand only; nothing runs it on push or tag.
