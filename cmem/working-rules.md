@@ -20,7 +20,9 @@ does not build an executable — workspace Tooling rule 1, letter H15).
   scrubbed.
 - **Scan before committing, binaries included** (workspace C3, 2026-10-26: Zig and Rust debug info
   embedded the owner's paths in committed `.wasm` in two siblings). Run the floor's pattern with
-  `git grep -a` as well as `-I`; this repo commits one binary today, `examples/math_50.wasm`.
+  `git grep -a` as well as `-I`; this repo commits six binaries today, the stamped fixture
+  `tests/*.wasm` (`examples/math_50.wasm` was deleted 2026-10-26; re-derived 2026-11-08 with
+  `git ls-files '*.wasm'`).
 - **The one email allowed is the maintainer contact** (🔒 owner, 2026-10-23 / 2026-10-26; letter
   H28), in at most three places: a registry manifest field (this repo publishes to no registry;
   `build.zig.zon` has no email field), the git commit author/committer address (used here, allowed;
@@ -29,3 +31,15 @@ does not build an executable — workspace Tooling rule 1, letter H15).
 - **Private facts go in `cmem/local/`**, gitignored since 2026-10-26.
 - wabt-ts and binaryen-ts are RETIRED (owner, 2026-10-26; H28): never cite `../wabt-ts/…` or
   `../binaryen-ts/…` as a location. This repo cites neither.
+
+## No `gh` (workspace Tooling rule 9; letter H30)
+
+- 🔒 **`gh` (the GitHub CLI) is not installed and will not be** (owner, 2026-11-08: "just checking
+  the repo is easier"). What GitHub holds is read with git: `git ls-remote origin` (branches, and
+  a tag's peeled `^{}` commit), `git fetch`; a public read-only API answer where git cannot say
+  (the repo's topics). A task only the GitHub web UI can do — a Release page, the `zig-package`
+  topic — is an **owner item**, printed as `OWNER ITEM (GitHub web UI): …` with its URL. Never
+  plan around `gh`, never record anything as "blocked on gh" or "`gh` absent".
+- This repo has no CI workflow, so the rule bites only the local scripts: `release.ts` and
+  `publish.ts`, both `gh`-free since 2026-11-08 ([overview.md](overview.md) § Release / publish
+  flow). Check: `git grep -n -w gh -- scripts` finds nothing (2026-11-08).

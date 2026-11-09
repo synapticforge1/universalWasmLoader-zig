@@ -31,8 +31,9 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
   `https://github.com/synapticforge1/universalWasmLoader-zig.git` on 2026-10-21 (owner's machine).
   Other clones still on the old `jrmarcum/...` URL keep working via redirect; repoint them with
   `git remote set-url origin <new url>`.
-- **Release scripts are owner-agnostic** — `release`/`publish` use `origin` and `gh` against the
-  current repo, so nothing in them hard-codes the owner. The Zigistry `zig-package` topic/listing
+- **Release scripts are owner-agnostic** — `release`/`publish` use `origin` (its URL gives the
+  `owner/repo` for printed GitHub links), so nothing in them hard-codes the owner. No `gh` since
+  2026-11-08 (§ Release / publish flow). The Zigistry `zig-package` topic/listing
   follows the repo to its new owner path.
 
 ## Current state — v2.0.0 (2026-11-08: SPEC 4.0.0, Zig 0.17.1; v1 implemented 2026-06-19)
@@ -77,7 +78,7 @@ Working tree:
 - **Migration record (2026-10-21):** the four Bash scripts and three Nushell twins were ported 1:1
   (same args, flags, guards, messages, exit codes 1/2) and deleted. Verified in a scratch clone on
   `C:`: `bump-version patch` committed a correct `.version` bump; `release --dry-run --no-build`
-  printed tag/push/`gh release` plan and refused a tag not at HEAD; `publish --dry-run` downgraded
+  printed tag/push/`gh release` plan (the `gh` step was replaced by an owner item 2026-11-08) and refused a tag not at HEAD; `publish --dry-run` downgraded
   guards to warnings; `fetch-wasmtime.ts` downloaded + extracted v45.0.2 and `zig build run` against
   it printed the expected adder output. The repo never had Deno scripts or config.
 - `vendor/` — wasmtime C API SDK (headers + `libwasmtime.dll.a` + `wasmtime.dll`). **gitignored**;
@@ -235,17 +236,32 @@ Bash `.sh` + Nushell `.nu` pairs). `-h`/`--help` prints each one's usage.
    bump not below the floor vs the last tag, the last tag's tests green for a patch/minor
    ([compat-gate.md](compat-gate.md)). `--dry-run` / `--no-commit`.
 2. **`scripts/release.ts`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`
-   and `zig build test`, runs `compat.ts --release` (since 2026-10-26), tags `v<version>`, pushes branch + tag to `origin`, and creates the matching **GitHub Release** via
-   `gh` (skippable). Idempotent (reuses a tag only if it points at HEAD; skips an existing Release;
-   degrades if `gh` is unauthenticated). Does **not** touch Zigistry. `--dry-run` / `--no-release` /
-   `--no-build` / `--remote`.
-3. **`scripts/publish.ts`** — the deliberate Zigistry step, decoupled from `release.ts`. **Zigistry has
-   no upload/CLI publish** ([help](https://zigistry.dev/help/)): a library is indexed by giving the
-   GitHub repo the topic **`zig-package`** (a program would use `Zig`), after which it (re)indexes on
-   the next push, typically within a day. The script verifies the `v<version>` tag exists locally + on
-   `origin`, requires an authenticated `gh`, is **idempotent** (no-op if the topic is already set),
-   prompts before changing public repo metadata (`--yes` to skip), then runs `gh repo edit --add-topic
-   zig-package`. `--dry-run` / `--allow-dirty` / `--skip-tag-check` / `--remote` / `--topic`.
+   and `zig build test`, runs `compat.ts --release` (since 2026-10-26), tags `v<version>`, pushes
+   branch + tag to `origin`, then **reads both back with `git ls-remote`** and refuses (exit 1)
+   unless the branch and the tag's peeled commit are HEAD. A GitHub Release page is printed as an
+   **OWNER ITEM** with its `releases/new?tag=` URL (and `--notes` to paste); `--no-release` omits
+   it. Idempotent (reuses a tag only if it points at HEAD). Does **not** touch Zigistry.
+   `--dry-run` / `--no-release` / `--no-build` / `--remote` / `--notes`.
+3. **`scripts/publish.ts`** — the deliberate Zigistry step, decoupled from `release.ts`, and it
+   **changes nothing**. **Zigistry has no upload/CLI publish** ([help](https://zigistry.dev/help/)):
+   a library is indexed by giving the GitHub repo the topic **`zig-package`** (a program would use
+   `Zig`), after which it (re)indexes on the next push, typically within a day. The script checks
+   the `v<version>` tag locally and on `origin` (`ls-remote`, same commit), reads the repo's topics
+   from GitHub's public REST API (unauthenticated GET, read-only; "unknown" is never read as
+   "set"), exits 0 with "nothing to do" when the topic is there, and otherwise prints the web-UI
+   step as an **OWNER ITEM**. `--allow-dirty` / `--skip-tag-check` / `--remote` / `--topic`.
+
+**No `gh` (owner, 2026-11-08; workspace letter H30, Tooling rule 9).** Until 2026-11-08
+`release.ts` created the GitHub Release with `gh release create` and `publish.ts` refused to run
+without an authenticated `gh` and added the topic with `gh repo edit`. Both now check the repo
+instead (`git ls-remote`, the public API), and print what only the web UI can do as an owner
+item. Rehearsed in a scratch clone pushing to a scratch bare remote (GitHub untouched,
+`ls-remote` re-read after): a real `release.ts` for a scratch 2.0.1 pushed, read back `main` =
+`v2.0.1^{}` = HEAD, exit 0 (its gate ran v2.0.0's 23 tests on the current src: green); with the
+tag push removed (mutant) it refused, `v2.0.2^{} = (missing)`, exit 1; `--dry-run` against a
+github.com remote printed the `releases/new?tag=` owner item. `publish.ts` on the real repo:
+tag `v2.0.0` = `c647164` here and on `origin`; GitHub's API: topics **none** → the owner item;
+an unknown remote → exit 1.
 
 **v1.0.0 status (re-verified 2026-10-21 against `origin`):** `v1.0.0` is an **annotated** tag — tag
 object `89a6d97`, pointing at **commit `07d954a`** ("Add scripts/bump-version.sh"). (Earlier memory
@@ -255,26 +271,26 @@ called `89a6d97` the tagged commit; that hash is the tag object. Resolve with
 `main` has advanced past it (`985cb5e` on `origin` before the 2026-10-21 commit) with `publish` and
 the Nushell forms. The tag was intentionally **not** moved: scripts/cmem aren't part of the published
 package surface, so `v1.0.0` still marks the library state. The **GitHub Release** and the **Zigistry
-topic** remain for the owner to do once `gh` is authenticated (`gh` is installed but unauthenticated
-on the build host, re-checked 2026-10-21). Zigistry needs only the topic + a push; the GitHub Release is
-optional polish. Next real version: `bump-version` → `release` (→ `publish`) will tag at HEAD.
+topic** are owner items (web UI). Zigistry needs only the topic + a push; the GitHub Release is
+optional polish.
 
 **v2.0.0 (2026-11-08, owner: "update the project memory files, commit, bump, then release and
 push"):** the first release through the compatibility gate. `bump-version.ts major` (floor major:
 SPEC 3.0.0 → 4.0.0, and v1.0.0's surface is not computable on Zig 0.17.1), then `release.ts`
 with `ZIG_LOCAL_CACHE_DIR` pointed at a NEW empty directory, so its "cold-cache" build really is
-cold (it only deletes the repo's own `.zig-cache`, which an NTFS cache dir bypasses). **`gh` is not
-installed on the build host (2026-11-08: not on PATH in Bash or PowerShell)**, so `release.ts`
-pushes the tag and skips the GitHub Release with a warning; the Release and the Zigistry topic
-(`publish.ts`, needs `gh`) stay owner items. **Released 2026-11-08:** bump `c647164` (its
+cold (it only deletes the repo's own `.zig-cache`, which an NTFS cache dir bypasses). The
+Release page and the Zigistry topic are owner items (web UI). **Released 2026-11-08:** bump `c647164` (its
 message is the script's, without the co-author line); `release.ts` exit 0 — cold build on a new
 cache dir: the three adder lines, `All 23 tests passed.`, `compat --release` major step vs floor
 major. Annotated tag **`v2.0.0`** = object `932b94c` → commit **`c647164`**. Read back with
 `git ls-remote origin`: `refs/heads/main` = `refs/tags/v2.0.0^{}` = `c647164`; `origin/main`'s
 `build.zig.zon` says `2.0.0`; the tag's source tarball answers HTTP 200, and `zig fetch` of it
 (Zig 0.17.1) gives the package hash
-`universal_wasm_loader-2.0.0-kwfgauDsAQB_yLRu7NqzpGuKdXu9FRj8mTy91DtmyO_g`. GitHub Release:
-not created (no `gh`). Zigistry: the `zig-package` topic is unchecked here (needs `gh`).
+`universal_wasm_loader-2.0.0-kwfgauDsAQB_yLRu7NqzpGuKdXu9FRj8mTy91DtmyO_g`. **Owner items
+(web UI), open:** the optional Release page
+(`https://github.com/synapticforge1/universalWasmLoader-zig/releases/new?tag=v2.0.0`), and the
+`zig-package` topic (GitHub's API, 2026-11-08: no topics set) — `bun scripts/publish.ts`
+re-checks and prints it.
 
 ## Known gaps / not yet done
 

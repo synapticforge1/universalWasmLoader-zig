@@ -63,6 +63,33 @@ export const tagExists = (tag: string): boolean =>
 
 export const revParse = (rev: string): string => capture(["git", "rev-parse", rev]).out.trim();
 
+/** `owner/repo` of a github.com remote (https or ssh URL), or null for any other host. */
+export function githubSlug(remote: string): string | null {
+  const url = capture(["git", "remote", "get-url", remote]).out.trim();
+  const m = url.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * What `remote` holds for `ref`, read with `git ls-remote` (workspace Tooling rule 9: check the
+ * repo, never the GitHub CLI). For an annotated tag this is the COMMIT it points at (the peeled `^{}` line).
+ */
+export function remoteCommit(remote: string, ref: string): string | null {
+  const r = capture(["git", "ls-remote", remote, ref, `${ref}^{}`]);
+  if (!r.ok) return null;
+  const lines = r.out.trim().split("\n").filter((l) => l !== "");
+  const peeled = lines.find((l) => l.endsWith("^{}")) ?? lines[0];
+  return peeled ? peeled.split(/\s+/)[0] : null;
+}
+
+/** Print a task only the GitHub web UI can do, as an owner item, never as blocked on a CLI. */
+export function ownerItem(what: string, url: string, detail: string[] = []): void {
+  console.log("");
+  console.log(`OWNER ITEM (GitHub web UI): ${what}`);
+  console.log(`  ${url}`);
+  for (const d of detail) console.log(`  ${d}`);
+}
+
 /** Print usage and exit 0. */
 export function help(usage: string): never {
   console.log(usage.trim());
