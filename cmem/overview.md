@@ -394,6 +394,13 @@ gives `universal_wasm_loader-2.1.0-kwfgarYFAgA-W5Whn_YYPHuk_A3ZJHl-G8DT_JyzNZlr`
   unmodified (`git archive` of the tag), on today's src: `GREEN — 23 passed, 0 failed`. Also on
   the same release: the no-`gh` scripts (`1f9ff65`, H30), so 2.1.0 is the first release cut by
   the `ls-remote`-checking `release.ts`.
+- **Version 2.1.1 (2026-11-09, owner: "update the project memory files, commit, push then
+  release")** — PATCH: the library is unchanged (header = loader-c 2.1.1 = 2.1.0, surface 120
+  symbols, floor vs `v2.1.0` patch, v2.1.0's 25 tests green on the src); what it carries is the
+  CI release workflow (H32), the Bun 1.4.4 pins (H31) and the wasmtime sha256 check. Order: push
+  `main` first and read its `checks` run on GitHub BEFORE tagging (the gate proven before a
+  release relies on it), then bump and release; the tag's run makes the first CI-made Release
+  page. The record is in § Release / publish flow.
 - **25 tests since `d4b785f`**: two for `uwl_err` — a failing result import (`envAdd` on
   `imports_50`: its own message, not a kind complaint; a NULL message → `(no message)`; `scale`
   still works), and a failing VOID import in a hand-assembled 61-byte module (`run` calls `ping`
