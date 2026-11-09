@@ -434,3 +434,110 @@ test "limitation: a float literal for an f32 parameter is refused, naming it" {
     try std.testing.expectError(error.WrongResultType, m.call(f64, "half", .{@as(f32, 2.5)}));
     try expectNames(&.{ "half", "f32", "f64" });
 }
+
+// ── A host callback that FAILS: uwl_err (C loader 2.1.0; workspace C39) ──────
+
+/// envAdd that fails; userdata is the message (or null for "(no message)").
+fn envAddFails(args: [*c]const uwl.c.uwl_val_t, n: usize, ud: ?*anyopaque) callconv(.c) uwl.c.uwl_val_t {
+    _ = args;
+    _ = n;
+    return uwl.c.uwl_err(@ptrCast(ud));
+}
+
+test "a failing result-import callback fails the export with its own message" {
+    const cbs = [_]uwl.HostCallback{
+        .{ .name = "envMul", .@"fn" = envMul, .userdata = null },
+        .{ .name = "envAdd", .@"fn" = envAddFails, .userdata = @constCast(@ptrCast("disk on fire")) },
+    };
+    var m = try uwl.Module.importWith("tests/imports_50.wasm", &cbs);
+    defer m.deinit();
+    try std.testing.expectError(error.CallFailed, m.call(i32, "combine", .{ 10, 7 }));
+    try expectNames(&.{ "envAdd", "env-add", "failed: disk on fire" });
+    try expectNotNamed("expected s32"); // its own message, not a result-kind complaint
+    // The other import is untouched, and the module keeps working.
+    try std.testing.expectApproxEqAbs(@as(f64, 12.0), try m.call(f64, "scale", .{ 3.0, 4.0 }), 1e-9);
+
+    const no_msg = [_]uwl.HostCallback{
+        .{ .name = "envMul", .@"fn" = envMul, .userdata = null },
+        .{ .name = "envAdd", .@"fn" = envAddFails, .userdata = null },
+    };
+    var m2 = try uwl.Module.importWith("tests/imports_50.wasm", &no_msg);
+    defer m2.deinit();
+    try std.testing.expectError(error.CallFailed, m2.call(i32, "combine", .{ 10, 7 }));
+    try expectNames(&.{ "envAdd", "(no message)" });
+}
+
+// A module with two VOID imports: `run` calls `ping`, then `after` (61 bytes,
+// hand-assembled; no stamped fixture has a void import). A void import ignores
+// its callback's value, so before uwl_err a failing `ping` could not stop the
+// WASM: `after` ran anyway.
+const void_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version 1
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type 0: () -> ()
+    // imports: env.ping, env.after (type 0)
+    0x02, 0x18, 0x02,
+    0x03, 'e', 'n', 'v', 0x04, 'p', 'i', 'n', 'g', 0x00, 0x00,
+    0x03, 'e', 'n', 'v', 0x05, 'a', 'f', 't', 'e', 'r', 0x00, 0x00,
+    0x03, 0x02, 0x01, 0x00, // func 2 : type 0
+    0x07, 0x07, 0x01, 0x03, 'r', 'u', 'n', 0x00, 0x02, // export "run" = func 2
+    0x0a, 0x08, 0x01, 0x06, 0x00, 0x10, 0x00, 0x10, 0x01, 0x0b, // call 0 (ping), call 1 (after)
+};
+
+const void_wit =
+    \\world void-imports {
+    \\  import ping: func();
+    \\  import after: func();
+    \\  export run: func();
+    \\}
+    \\
+;
+
+const PingMode = enum(u8) { ok, fail };
+
+fn pingCb(args: [*c]const uwl.c.uwl_val_t, n: usize, ud: ?*anyopaque) callconv(.c) uwl.c.uwl_val_t {
+    _ = args;
+    _ = n;
+    const mode: *const PingMode = @ptrCast(@alignCast(ud.?));
+    return if (mode.* == .fail) uwl.c.uwl_err("ping refused") else uwl.c.uwl_void();
+}
+
+fn afterCb(args: [*c]const uwl.c.uwl_val_t, n: usize, ud: ?*anyopaque) callconv(.c) uwl.c.uwl_val_t {
+    _ = args;
+    _ = n;
+    const ran: *bool = @ptrCast(@alignCast(ud.?));
+    ran.* = true;
+    return uwl.c.uwl_void();
+}
+
+test "a failing VOID-import callback stops the WASM at the import" {
+    const wasm = "tests/void_imports.wasm";
+    const wit = "tests/void_imports.wit";
+    try writeScratch(wasm, &void_wasm);
+    defer removeScratch(wasm);
+    try writeScratch(wit, void_wit);
+    defer removeScratch(wit);
+
+    for ([_]PingMode{ .ok, .fail }) |mode_value| {
+        var mode = mode_value;
+        var after_ran = false;
+        const cbs = [_]uwl.HostCallback{
+            .{ .name = "ping", .@"fn" = pingCb, .userdata = &mode },
+            .{ .name = "after", .@"fn" = afterCb, .userdata = &after_ran },
+        };
+        var m = try uwl.Module.importWith(wasm, &cbs);
+        defer m.deinit();
+        switch (mode) {
+            // The control: both imports run.
+            .ok => {
+                try m.call(void, "run", .{});
+                try std.testing.expect(after_ran);
+            },
+            // The failure stops the WASM: `after` never runs, and the message is ping's.
+            .fail => {
+                try std.testing.expectError(error.CallFailed, m.call(void, "run", .{}));
+                try expectNames(&.{ "ping", "failed: ping refused" });
+                try std.testing.expect(!after_ran);
+            },
+        }
+    }
+}

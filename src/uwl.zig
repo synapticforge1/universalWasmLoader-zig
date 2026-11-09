@@ -34,7 +34,10 @@ pub const Error = error{
 
 /// A host function for one WIT import: `name` is the camelCase WIT name
 /// (`env-mul` → `"envMul"`), `fn` a `callconv(.c)` function returning a value
-/// of the import's WIT result kind (`c.uwl_i32(...)` for `s32`, …).
+/// of the import's WIT result kind (`c.uwl_i32(...)` for `s32`, …). To FAIL,
+/// return `c.uwl_err("why")` (C loader 2.1.0): for any import, void ones
+/// included, the WASM stops there and the export's call is `error.CallFailed`
+/// with `lastError()` = `host callback <name> (WIT import "<name>") failed: why`.
 pub const HostCallback = c.uwl_host_callback_t;
 
 // ── The last failure's message (per thread) ─────────────────────────────────
@@ -150,6 +153,7 @@ fn kindName(kind: c_uint) []const u8 {
         c.UWL_F64 => "f64",
         c.UWL_BOOL => "bool",
         c.UWL_STR => "string",
+        c.UWL_ERR => "an error",
         else => "an unknown kind",
     };
 }

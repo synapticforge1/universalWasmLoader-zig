@@ -75,7 +75,9 @@ square(5) = 25
   needs one; a missing one fails the load, naming all of them. A callback is a
   `callconv(.c)` function that must return the import's WIT result kind
   (`uwl.c.uwl_i32(...)` for `s32`); another kind fails the export call that
-  reached it.
+  reached it. To **fail**, a callback returns `uwl.c.uwl_err("why")`: for any
+  import, void ones included, the WASM stops there and the export's call is
+  `error.CallFailed`, with `lastError()` ending `failed: why`.
 - `m.call(comptime T, name, args) !T` — call an export returning
   `i32`/`i64`/`f32`/`f64`/`bool`/`void`. `args` is a tuple, e.g. `.{ 3, 4 }`.
 - `m.callStr(allocator, name, args) ![]u8` — call a string-returning export; the

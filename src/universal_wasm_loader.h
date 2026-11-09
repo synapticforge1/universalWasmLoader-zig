@@ -64,16 +64,17 @@ typedef enum {
     UWL_F32,      /**< 32-bit float (WIT `f32`). */
     UWL_F64,      /**< 64-bit float (WIT `f64`). */
     UWL_BOOL,     /**< Boolean (WIT `bool`). */
-    UWL_STR       /**< UTF-8 string (WIT `string`). */
+    UWL_STR,      /**< UTF-8 string (WIT `string`). */
+    UWL_ERR       /**< A host callback's failure; `str` is the message. See #uwl_err. */
 } uwl_kind_t;
 
 /**
  * A dynamically-typed value crossing the host↔WASM boundary with ABI
  * translation applied.
  *
- * When `kind == UWL_STR`, `str` points to a heap-allocated, NUL-terminated
- * buffer of `len` bytes that the value owns. Free owned string values with
- * #uwl_val_free.
+ * When `kind == UWL_STR` (or #UWL_ERR, whose `str` is the message), `str`
+ * points to a heap-allocated, NUL-terminated buffer of `len` bytes that the
+ * value owns. Free owned values with #uwl_val_free.
  */
 typedef struct uwl_val {
     uwl_kind_t kind;
@@ -84,7 +85,7 @@ typedef struct uwl_val {
         double  f64;
         int     b;
     } as;
-    char  *str; /**< Owned UTF-8 bytes when `kind == UWL_STR`, else NULL. */
+    char  *str; /**< Owned UTF-8 bytes when `kind == UWL_STR` / `UWL_ERR`, else NULL. */
     size_t len; /**< Byte length of `str` when `kind == UWL_STR`. */
 } uwl_val_t;
 
@@ -100,6 +101,15 @@ static inline uwl_val_t uwl_void(void)      { uwl_val_t x; x.kind = UWL_VOID; x.
 uwl_val_t uwl_strn(const char *s, size_t len);
 /** Construct an owned string value by copying a NUL-terminated `s`. */
 uwl_val_t uwl_str(const char *s);
+/**
+ * Construct a FAILURE for a host callback to return: kind #UWL_ERR, owning a
+ * copy of `msg` (NULL gives "(no message)"). The trampoline then traps, for
+ * every import, void ones included, so the WASM stops at the import, and the
+ * #uwl_call of the export that reached it fails with
+ * `host callback <name> (WIT import "<name>") failed: <msg>`. The loader frees
+ * the value. Not an argument or result kind: #uwl_call refuses it as one.
+ */
+uwl_val_t uwl_err(const char *msg);
 
 /* Value accessors (do not transfer ownership). */
 static inline int32_t     uwl_as_i32(uwl_val_t v)  { return v.as.i32; }
@@ -128,6 +138,9 @@ void uwl_string_free(char *s);
  * export that called the import fails naming the callback, the import, the
  * result type and the value. An import with no result ignores the value (the
  * loader frees an owned string either way).
+ *
+ * To FAIL, return #uwl_err("why"): for any import, void ones included, the
+ * WASM stops there and the export's #uwl_call fails with that message.
  */
 typedef uwl_val_t (*uwl_host_fn_t)(const uwl_val_t *args, size_t nargs, void *userdata);
 
@@ -480,6 +493,7 @@ static const char *uwl__kind_name(uwl_kind_t k) {
         case UWL_F64:  return "f64";
         case UWL_BOOL: return "bool";
         case UWL_STR:  return "string";
+        case UWL_ERR:  return "error";
     }
     return "?";
 }
@@ -494,6 +508,7 @@ static const char *uwl__kind_ctor(uwl_kind_t k) {
         case UWL_F64:  return "uwl_f64";
         case UWL_BOOL: return "uwl_bool";
         case UWL_STR:  return "uwl_str";
+        case UWL_ERR:  return "uwl_err";
     }
     return "?";
 }
@@ -509,6 +524,7 @@ static char *uwl__show_val(const uwl_val_t *v) {
         case UWL_BOOL: return uwl__fmt("%s (bool)", v->as.b ? "true" : "false");
         case UWL_STR:  return uwl__fmt("\"%.*s\" (string)", (int)(v->len > 60 ? 60 : v->len),
                                        v->str ? v->str : "");
+        case UWL_ERR:  return uwl__fmt("an error (%s)", v->str ? v->str : "no message");
     }
     return uwl__fmt("an invalid value (kind %d)", (int)v->kind);
 }
@@ -983,6 +999,15 @@ static wasm_trap_t *uwl__import_trampoline(void *env, wasmtime_caller_t *caller,
     for (size_t i = 0; i < nvals; i++) uwl_val_free(&vals[i]);
     if (vals != stackvals) free(vals);
     if (fault) return fault;
+
+    /* The callback FAILED (uwl_err): trap with its message, for every import,
+       void ones too, so the WASM stops here (workspace C39). */
+    if (ret.kind == UWL_ERR) {
+        wasm_trap_t *t = uwl__trap_fmt("host callback %s (WIT import \"%s\") failed: %s",
+                                       f->camel, f->kebab, ret.str ? ret.str : "(no message)");
+        uwl_val_free(&ret);
+        return t;
+    }
 
     /* SPEC 4.0.0 §4: the return value must be the import's WIT result kind,
        never coerced. A void import ignores it. A `string` result never gets
@@ -1549,9 +1574,15 @@ uwl_val_t uwl_strn(const char *s, size_t len) {
 
 uwl_val_t uwl_str(const char *s) { return uwl_strn(s ? s : "", s ? strlen(s) : 0); }
 
+uwl_val_t uwl_err(const char *msg) {
+    uwl_val_t x = uwl_str(msg ? msg : "(no message)");
+    x.kind = UWL_ERR;
+    return x;
+}
+
 void uwl_val_free(uwl_val_t *v) {
     if (!v) return;
-    if (v->kind == UWL_STR) free(v->str);
+    if (v->kind == UWL_STR || v->kind == UWL_ERR) free(v->str);
     *v = uwl_void();
 }
 
