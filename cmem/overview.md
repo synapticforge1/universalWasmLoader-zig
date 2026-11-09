@@ -283,7 +283,9 @@ Bash `.sh` + Nushell `.nu` pairs). `-h`/`--help` prints each one's usage.
    `233ac3d1…` (measured; `fetch-wasmtime.ts` now checks `WASMTIME_SHA256` when set, a wrong
    value refuses before extracting). Locally run: every `checks` shell line (version parse, the two
    output greps) and the PowerShell download function (right sha → Bun 1.4.4 runs; wrong → refused).
-   **UNMEASURED on GitHub until the next tag run** — the first page's `author.login` is the proof.
+   **MEASURED on GitHub 2026-11-09:** `main` push run 42654594017 (`checks` green), tag `v2.1.1`
+   run 42655501506 (both jobs green); the page's `author.login` = `github-actions[bot]` (record
+   under "v2.1.1" below).
 3. **`scripts/publish.ts`** — the deliberate Zigistry step, decoupled from `release.ts`, and it
    **changes nothing**. **Zigistry has no upload/CLI publish** ([help](https://zigistry.dev/help/)):
    a library is indexed by giving the GitHub repo the topic **`zig-package`** (a program would use
@@ -345,8 +347,26 @@ H30 `release.ts`: its own read-back printed `main = v2.1.0^{} = 4a198dc`. Re-rea
 ls-remote` gives the same; `origin/main`'s `build.zig.zon` says `2.1.0`; `git grep -w gh
 origin/main -- scripts` → nothing; the tag's tarball answers HTTP 200; `zig fetch` (Zig 0.17.1)
 gives `universal_wasm_loader-2.1.0-kwfgarYFAgA-W5Whn_YYPHuk_A3ZJHl-G8DT_JyzNZlr`. **Owner items
-(web UI), open:** the optional Release pages for `v2.0.0` and `v2.1.0`
-(`…/releases/new?tag=v2.1.0`), and the `zig-package` topic.
+(web UI), open:** ~~the optional Release pages for `v2.0.0` and `v2.1.0`~~ (2026-11-09: no
+backfill, owner H32 — old tags keep no page), and the `zig-package` topic.
+
+**v2.1.1 (2026-11-09, owner: "update the project memory files, commit, push then release") — the
+first release whose Release page CI made.** Memory `8c3bb37` pushed first; its `main` push ran
+the new workflow's `checks` on GitHub for the first time, run **42654594017**: every step
+success (pinned installs, `zig build test`, the adder lines, surface, `bun test scripts/`, compat
+report), `release` skipped as designed (a branch push). Only then: `bump-version.ts patch` →
+**`d42f252`** (floor patch; v2.1.0's 25 tests green), `release.ts` on a new empty cache (adder
+lines, `All 25 tests passed.`, `compat --release` patch vs floor patch), annotated tag
+**`v2.1.1`** = object `b1708f7` → `d42f252`; its read-back printed `main = v2.1.1^{} = d42f252`.
+The tag's run **42655501506**: `checks` success, **`release` success** (pinned Bun, the script
+fetched at the tagged commit, the page created). Read back through the public REST API: Release
+`v2.1.1`, **`author.login` = `github-actions[bot]`**, not a draft, not a prerelease, created
+2026-11-09T16:31:15Z, generated notes ("Full Changelog: v2.1.0...v2.1.1"); the tag unmoved
+(`ls-remote`: `v2.1.1^{}` = `d42f252`). The tarball answers HTTP 200; `zig fetch` (Zig 0.17.1)
+→ `universal_wasm_loader-2.1.1-kwfgarYFAgCdmh3zo0DyL2M5Sy5kqj4oENLGIs_e7xRG`. Runs were read with a
+one-time Bun poller over `GET /repos/…/actions/runs?head_sha=…` (no GitHub CLI); a branch push
+and a tag push of one commit give two runs with one `head_sha`, told apart by `head_branch` (the
+tag name for a tag push).
 
 ## Known gaps / not yet done
 
