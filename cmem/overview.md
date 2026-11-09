@@ -254,7 +254,10 @@ Bash `.sh` + Nushell `.nu` pairs). `-h`/`--help` prints each one's usage.
    an owner item (`--notes` / `--no-release` are gone with that). Idempotent (reuses a tag only if
    it points at HEAD). Does **not** touch Zigistry. `--dry-run` / `--no-build` / `--remote`.
 4. **`.github/workflows/release.yml`** (2026-11-09, workspace H32; owner: "they both need the CI
-   and release pages, not by hand") — on a pushed `v*` tag. Job **`checks`** (`windows-latest`,
+   and release pages, not by hand") — on a pushed `v*` tag; a push to `main` runs `checks` only,
+   with `compat.ts` in report mode and no version-vs-tag check, so the CI gate is proven on GitHub
+   before a release relies on it (loader-v's shape; the `release` job has `if: github.ref_type ==
+   'tag'`). Job **`checks`** (`windows-latest`,
    because `build.zig` knows only the `x86_64-mingw` SDK; `contents: read`; tokenless clone of the
    tag, which must be `github.sha` and equal `v` + `build.zig.zon`'s `.version`): installs Bun
    1.4.4 and Zig 0.17.1 from their official zips and the wasmtime SDK through

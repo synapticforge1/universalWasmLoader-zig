@@ -5,6 +5,8 @@ name: release
 # never by hand and never with the GitHub CLI (workspace letters H30, H32; owner, 2026-11-09:
 # "they both need the CI and release pages, not by hand"). Only tags pushed after this workflow
 # landed get a page (owner: "only new tags will get release pages"), so there is no dispatch.
+# A push to `main` runs `checks` only (compatibility gate in report mode), so the CI gate is
+# proven on GitHub before a release relies on it (loader-v's shape).
 #
 # Two jobs, on purpose (workspace C30):
 # - `checks` runs everything that executes code (Zig, the wasmtime SDK, Bun, the test suites, the
@@ -22,6 +24,8 @@ name: release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -47,15 +51,17 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Clone the tag (full history and tags for the gate; no token)
+      - name: Clone the pushed ref (full history and tags for the gate; no token)
         run: |
           set -euo pipefail
           git clone --branch "$TAG" "https://github.com/${{ github.repository }}" .
           test "$(git rev-parse HEAD)" = "${{ github.sha }}" \
-            || { echo "::error::tag $TAG no longer points at ${{ github.sha }}"; exit 1; }
-          version="$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' build.zig.zon)"
-          test "v$version" = "$TAG" \
-            || { echo "::error::build.zig.zon says $version, the tag is $TAG"; exit 1; }
+            || { echo "::error::$TAG no longer points at ${{ github.sha }}"; exit 1; }
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' build.zig.zon)"
+            test "v$version" = "$TAG" \
+              || { echo "::error::build.zig.zon says $version, the tag is $TAG"; exit 1; }
+          fi
 
       - name: Install Bun and Zig (pinned by sha256)
         shell: pwsh
@@ -104,12 +110,19 @@ jobs:
       - name: Release scripts' tests
         run: bun test scripts/
 
-      # The compatibility gate (cmem/compat-gate.md): the version meets the floor vs the tag
-      # before it, and that tag's tests pass for a patch or minor.
+      # The compatibility gate (cmem/compat-gate.md). On a tag: the version meets the floor vs the
+      # tag before it, and that tag's tests pass for a patch or minor. On `main`: the report
+      # (floor and the last tag's tests against today's src).
       - name: Compatibility gate
-        run: bun scripts/compat.ts --release
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            bun scripts/compat.ts --release
+          else
+            bun scripts/compat.ts
+          fi
 
   release:
+    if: github.ref_type == 'tag'
     needs: checks
     runs-on: ubuntu-latest
     permissions:
