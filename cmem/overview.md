@@ -14,8 +14,8 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
   the WASM engine. See "Zig 0.17.1 port" below for what moved.
 - **What it gives Zig callers:** error unions instead of out-params, native Zig argument/result types,
   and a **comptime-typed call site** (`m.call(i32, "add", .{3,4})`) — no manual `uwl_val_t` boxing.
-- **Distribution:** a Zig module (`build.zig.zon` name `universal_wasm_loader`, v2.0.0 since
-  2026-11-08 (v1.0.0 before), MIT) exposing
+- **Distribution:** a Zig module (`build.zig.zon` name `universal_wasm_loader`, v2.1.0 since
+  2026-11-09 (v2.0.0 2026-11-08, v1.0.0 before), MIT) exposing
   the importable module `uwl` (`b.addModule("uwl", ...)`). The MIT `LICENSE` file is listed in the
   manifest `paths`, so it ships with the published package.
 
@@ -36,7 +36,7 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
   2026-11-08 (§ Release / publish flow). The Zigistry `zig-package` topic/listing
   follows the repo to its new owner path.
 
-## Current state — v2.0.0 (2026-11-08: SPEC 4.0.0, Zig 0.17.1; v1 implemented 2026-06-19)
+## Current state — v2.1.0 (2026-11-09: + C loader 2.1.0's `uwl_err`; v2.0.0 2026-11-08: SPEC 4.0.0, Zig 0.17.1; v1 implemented 2026-06-19)
 
 Working tree:
 
@@ -339,11 +339,13 @@ re-checks and prints it.
   surface is not computable on Zig 0.17.1). Bumped and released 2026-11-08 (§ Release / publish
   flow); before that the version line stayed `1.0.0` (`main` was ahead of `origin` by
   the earlier unpushed `541a02e` / `7cbe498` / `e4f026a` plus this session's commits).
-- **Next version (2026-11-08): MINOR, 2.1.0 decided, NOT bumped or pushed** — floor vs `v2.0.0` is
+- **Version 2.1.0 (decided 2026-11-08, released 2026-11-09 on the owner's "update the project
+  memory files, commit, bump, push and release"; § Release / publish flow)** — floor vs `v2.0.0` is
   minor (`added: const c.UWL_ERR`, `added: fn c.uwl_err`); `bump patch` refused, `bump minor
   --dry-run` allowed. **Rule 3 ran for real for the first time:** `v2.0.0`'s own 23 tests,
   unmodified (`git archive` of the tag), on today's src: `GREEN — 23 passed, 0 failed`. Also on
-  local `main`: the no-`gh` scripts (`1f9ff65`, H30). Bump, push and release are the owner's.
+  the same release: the no-`gh` scripts (`1f9ff65`, H30), so 2.1.0 is the first release cut by
+  the `ls-remote`-checking `release.ts`.
 - **25 tests since `d4b785f`**: two for `uwl_err` — a failing result import (`envAdd` on
   `imports_50`: its own message, not a kind complaint; a NULL message → `(no message)`; `scale`
   still works), and a failing VOID import in a hand-assembled 61-byte module (`run` calls `ping`
