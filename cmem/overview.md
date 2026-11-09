@@ -192,7 +192,7 @@ after the call (until 2026-11-08 the copies leaked, one per string argument per 
   leaves `str` NULL for every non-string result, so the other half still fires.
   **The run step is a plain `Run` with the test binary as an argument, not `addRunArtifact`** — see
   [best-practices.md](best-practices.md) L1.
-  **21 tests since 2026-11-08** (SPEC 4.0.0, ledger C29): `imports_50` now through `importWith`
+  **21 tests since 2026-11-08 (23 with the two "limitation" tests, § Known gaps)** (SPEC 4.0.0, ledger C29): `imports_50` now through `importWith`
   (plus once through the raw layer), and ten SPEC § 8 "Refusals", each asserting what
   `lastError()` names: no callbacks (`envMul` + `envAdd`); only `envMul` (`envAdd`, not `envMul`);
   a null `fn` counts as missing; `envAdd` returning no value / `2.9 (f64)` / `true (bool)` /
@@ -281,10 +281,21 @@ optional polish. Next real version: `bump-version` → `release` (→ `publish`)
 - **An integer literal for an `s64` parameter goes as s32** (it fits) and is refused: write
   `@as(i64, 5)`. Likewise a float literal for an `f32` parameter: `@as(f32, 2.5)`. Fixing that
   needs a C API that reports an export's parameter kinds (`uwl_export_sig`-like), which loader-c
-  does not have; no fixture has an `s64` or `f32` parameter today.
-- **Version decision for SPEC 4.0.0 (2026-11-08): MAJOR, 2.0.0** — the gate's floor vs `v1.0.0` is
-  major (and v1.0.0's surface is not computable on Zig 0.17.1). The version line stays `1.0.0`:
-  `bump-version.ts major` → `release.ts` are the owner's (nothing pushed; `main` is ahead of
-  `origin` by the earlier unpushed `541a02e` / `7cbe498` / `e4f026a` plus this session's commits).
+  does not have. **Pinned by two tests since 2026-11-08** (owner: "add a test for the limitation
+  to check for it and catch it before it becomes an issue"): no stamped fixture has an `s64` or
+  `f32` parameter, so the tests write a hand-assembled 70-byte module (`sum(i64,i64)->i64`,
+  `half(f32)->f32`, bytes inline in `tests/uwl_test.zig`) + its `.wit` as scratch files. They
+  assert the refusal names the parameter and type, a runtime `i32` / `f64` is never widened /
+  narrowed, the `@as` forms compute (incl. values beyond s32), a literal outside s32 is s64
+  unannotated, and the result kind is checked. Inverted 2026-11-08: literals always s64 → the
+  s64 test red (`found 11`); float literals f32 → the f32 test red (`found 1.25`); a runtime
+  `f64` narrowed to f32 → ONLY the f32 test red (no earlier test saw that); `i64.add` → `i64.sub`
+  in the module → the s64 test red (`expected 11, found -1`). If the binding ever learns the WIT
+  kinds, those refusal checks fail by design: update them with the README. 23 tests.
+- **Version decision for SPEC 4.0.0 (2026-11-08): MAJOR, 2.0.0, agreed by the owner** ("I agree
+  that next version would be 2.0.0") — the gate's floor vs `v1.0.0` is major (and v1.0.0's
+  surface is not computable on Zig 0.17.1). The version line stays `1.0.0` until the owner says
+  to bump: `bump-version.ts major` → `release.ts` (nothing pushed; `main` is ahead of `origin` by
+  the earlier unpushed `541a02e` / `7cbe498` / `e4f026a` plus this session's commits).
 - **Vendored header drift:** `src/universal_wasm_loader.h` is a manual copy of upstream
   `universalWasmLoader-c`; there is no automated sync — bump it deliberately per targeted release.

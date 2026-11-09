@@ -42,6 +42,14 @@ type (an `i64` for an `s32`, `2.7` for an `s32`, `"4"` for an `s32`) is
 `error.WrongResultType` — never a zero. `uwl.lastError()` names the export and
 the parameter.
 
+**Literals for `s64` and `f32` parameters need their type.** A literal's kind
+comes from its value, not the `.wit` (the C loader cannot report an export's
+parameter types): `5` is `s32` and `2.5` is `f64`, so `sum(5, 6)` on an `s64`
+export and `half(2.5)` on an `f32` one are refused, naming the parameter. Write
+`m.call(i64, "sum", .{ @as(i64, 5), @as(i64, 6) })` and
+`m.call(f32, "half", .{@as(f32, 2.5)})`. A tested contract (`zig build test`,
+the two "limitation" tests), not an accident.
+
 ## Build & run
 
 ```sh

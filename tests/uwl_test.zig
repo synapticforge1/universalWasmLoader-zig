@@ -348,3 +348,89 @@ test "refusal: only an ABSENT .wit is raw; an unreadable one fails the load" {
     defer r.deinit();
     try std.testing.expectApproxEqAbs(@as(f64, 10.0), try r.call(f64, "multiply", .{ 2.5, 4.0 }), 1e-9);
 }
+
+// ── The literal limitation: s64 and f32 parameters ──────────────────────────
+// The C API cannot report an export's parameter kinds, so a LITERAL's kind is
+// chosen by its value (an integer literal is s32 when it fits, a float literal
+// f64), not by the WIT. No stamped fixture has an s64 or f32 parameter, so this
+// module is built here: `sum(a: i64, b: i64) -> i64` (a + b) and
+// `half(x: f32) -> f32` (x * 0.5), 70 bytes, written beside its .wit and removed.
+// The test pins today's contract: such a literal is REFUSED, loudly, naming the
+// parameter and its type (never silently converted), and the explicit form
+// works. If the binding ever learns the WIT kinds, the refusal checks below
+// fail and say so; update them and the README together.
+
+const wide_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version 1
+    // type section: (i64, i64) -> i64; (f32) -> f32
+    0x01, 0x0c, 0x02, 0x60, 0x02, 0x7e, 0x7e, 0x01, 0x7e, 0x60, 0x01, 0x7d, 0x01, 0x7d,
+    // function section: func 0 : type 0, func 1 : type 1
+    0x03, 0x03, 0x02, 0x00, 0x01,
+    // export section: "sum" = func 0, "half" = func 1
+    0x07, 0x0e, 0x02, 0x03, 's', 'u', 'm', 0x00, 0x00, 0x04, 'h', 'a', 'l', 'f', 0x00, 0x01,
+    // code section
+    0x0a, 0x14, 0x02,
+    0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x7c, 0x0b, // local.get 0, local.get 1, i64.add
+    0x0a, 0x00, 0x20, 0x00, 0x43, 0x00, 0x00, 0x00, 0x3f, 0x94, 0x0b, // local.get 0, f32.const 0.5, f32.mul
+};
+
+const wide_wit =
+    \\world wide {
+    \\  export sum: func(a: s64, b: s64) -> s64;
+    \\  export half: func(x: f32) -> f32;
+    \\}
+    \\
+;
+
+test "limitation: an s32-sized integer literal for an s64 parameter is refused, naming it" {
+    const wasm = "tests/wide_params.wasm";
+    const wit = "tests/wide_params.wit";
+    try writeScratch(wasm, &wide_wasm);
+    defer removeScratch(wasm);
+    try writeScratch(wit, wide_wit);
+    defer removeScratch(wit);
+    var m = try uwl.Module.import(wasm);
+    defer m.deinit();
+
+    // The limitation: 5 fits s32, so it is sent as s32, and the loader refuses it.
+    try std.testing.expectError(error.CallFailed, m.call(i64, "sum", .{ 5, 6 }));
+    try expectNames(&.{ "sum", "'a'", "s64" });
+    // The same through a runtime i32: an i32 is s32, never widened.
+    const narrow: i32 = 5;
+    try std.testing.expectError(error.CallFailed, m.call(i64, "sum", .{ @as(i64, 1), narrow }));
+    try expectNames(&.{ "sum", "'b'", "s64" });
+
+    // The workaround: say the type. Values beyond s32 survive both ways.
+    try std.testing.expectEqual(@as(i64, 11), try m.call(i64, "sum", .{ @as(i64, 5), @as(i64, 6) }));
+    try std.testing.expectEqual(@as(i64, (1 << 40) + 1), try m.call(i64, "sum", .{ @as(i64, 1 << 40), @as(i64, 1) }));
+    try std.testing.expectEqual(@as(i64, -(1 << 62)), try m.call(i64, "sum", .{ @as(i64, -(1 << 61)), @as(i64, -(1 << 61)) }));
+    // A literal OUTSIDE s32 is s64 already, so it needs no annotation.
+    try std.testing.expectEqual(@as(i64, (1 << 40) + (1 << 33)), try m.call(i64, "sum", .{ 1 << 40, 1 << 33 }));
+    // The result kind is still checked: s64 is not i32.
+    try std.testing.expectError(error.WrongResultType, m.call(i32, "sum", .{ @as(i64, 1), @as(i64, 2) }));
+    try expectNames(&.{ "sum", "s64", "s32" });
+}
+
+test "limitation: a float literal for an f32 parameter is refused, naming it" {
+    const wasm = "tests/wide_params.wasm";
+    const wit = "tests/wide_params.wit";
+    try writeScratch(wasm, &wide_wasm);
+    defer removeScratch(wasm);
+    try writeScratch(wit, wide_wit);
+    defer removeScratch(wit);
+    var m = try uwl.Module.import(wasm);
+    defer m.deinit();
+
+    // The limitation: a float literal is f64.
+    try std.testing.expectError(error.CallFailed, m.call(f32, "half", .{2.5}));
+    try expectNames(&.{ "half", "'x'", "f32" });
+    // A runtime f64 is f64, never narrowed.
+    const double: f64 = 2.5;
+    try std.testing.expectError(error.CallFailed, m.call(f32, "half", .{double}));
+    try expectNames(&.{ "half", "'x'", "f32" });
+
+    // The workaround: say the type.
+    try std.testing.expectEqual(@as(f32, 1.25), try m.call(f32, "half", .{@as(f32, 2.5)}));
+    try std.testing.expectError(error.WrongResultType, m.call(f64, "half", .{@as(f32, 2.5)}));
+    try expectNames(&.{ "half", "f32", "f64" });
+}
