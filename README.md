@@ -24,9 +24,23 @@ const greeting = try m.callStr(allocator, "greet", .{"World"});
 defer allocator.free(greeting);                          // "Hello, World!"
 ```
 
-The result type is chosen at the call site (`m.call(i32, ...)`); each argument in
-the tuple is read with the correct type from the export's WIT signature, so you
-pass plain Zig values. A companion `.wit` next to the `.wasm` is required.
+The result type is chosen at the call site (`m.call(i32, ...)`), and each
+argument's WIT type is its Zig type — nothing is converted (SPEC 4.0.0):
+
+| Zig argument | WIT type |
+| --- | --- |
+| `i32`, or an integer literal that fits it | `s32` |
+| `i64`, or a larger integer literal | `s64` |
+| `f32` | `f32` |
+| `f64`, or a float literal | `f64` |
+| `bool` | `bool` |
+| `[]const u8` / a string literal | `string` |
+
+The loader checks every argument against the export's `.wit`: a wrong count or
+type (an `i64` for an `s32`, `2.7` for an `s32`, `"4"` for an `s32`) is
+`error.CallFailed`, and a result of another kind than `T` is
+`error.WrongResultType` — never a zero. `uwl.lastError()` names the export and
+the parameter.
 
 ## Build & run
 
@@ -46,17 +60,44 @@ square(5) = 25
 
 ## API
 
-- `uwl.Module.import(path: [:0]const u8) !Module` — load a module (its `.wit` is
-  auto-detected; a `@N` path suffix pins the version).
+- `uwl.Module.import(path: [:0]const u8) !Module` — load a module that imports
+  nothing (a `@N` path suffix pins the version).
+- `uwl.Module.importWith(path, callbacks: []const uwl.HostCallback) !Module` —
+  load a module with host functions for its WIT imports. **Every** WIT import
+  needs one; a missing one fails the load, naming all of them. A callback is a
+  `callconv(.c)` function that must return the import's WIT result kind
+  (`uwl.c.uwl_i32(...)` for `s32`); another kind fails the export call that
+  reached it.
 - `m.call(comptime T, name, args) !T` — call an export returning
   `i32`/`i64`/`f32`/`f64`/`bool`/`void`. `args` is a tuple, e.g. `.{ 3, 4 }`.
 - `m.callStr(allocator, name, args) ![]u8` — call a string-returning export; the
   result is owned by the caller (`allocator.free`).
 - `m.deinit()` — free the module.
+- `uwl.lastError() []const u8` — the loader's message for this thread's last
+  failed call (`""` after a success).
 
-Failures surface as Zig errors (`error.ImportFailed`, `error.CallFailed`, …). For
-the underlying message, the raw C API is reachable as `uwl.c` (e.g.
-`uwl.c.uwl_last_error()`).
+```zig
+fn envAdd(args: [*c]const uwl.c.uwl_val_t, n: usize, ud: ?*anyopaque) callconv(.c) uwl.c.uwl_val_t {
+    _ = n;
+    _ = ud;
+    return uwl.c.uwl_i32(uwl.c.uwl_as_i32(args[0]) + uwl.c.uwl_as_i32(args[1]));
+}
+
+var m = try uwl.Module.importWith("tests/imports_50.wasm", &.{
+    .{ .name = "envMul", .@"fn" = envMul, .userdata = null },
+    .{ .name = "envAdd", .@"fn" = envAdd, .userdata = null },
+});
+```
+
+The companion `.wit` is read first. Only an **absent** one gives raw exports
+(called by their WASM names); a `.wit` that cannot be read, or does not parse
+(an unsupported type such as `u32`, a malformed parameter, a WIT export the
+module lacks), fails the load naming the `.wit` and the fault.
+
+Failures surface as Zig errors (`error.ImportFailed`, `error.CallFailed`,
+`error.WrongResultType`, `error.OutOfMemory`) with the message in
+`uwl.lastError()`. The raw C API is reachable as `uwl.c` (the singleton and the
+instance pool live there).
 
 ## How it links
 
@@ -91,7 +132,8 @@ Removals are deprecated for at least one minor release first and listed below.
 
 | Version | Change | Migration |
 | --- | --- | --- |
-| — | None since 1.0.0. | — |
+| 2.0.0 (unreleased) | SPEC 4.0.0, from C loader 2.0.0: only an absent `.wit` is raw; a `.wit` must parse strictly; every WIT import needs a callback and its return kind is checked; typed-call arguments are checked, never coerced — an `i64` is no longer narrowed to `s32`, nor an integer widened to `f64`; `call(T, …)` refuses a result of another kind. | Pass `i32` for `s32` and `f64` (or a float literal, `4.0`) for `f64`; load modules with imports through `importWith`; read `uwl.lastError()` for the reason. |
+| 2.0.0 (unreleased) | Requires Zig 0.17.1 (`@cImport` is gone; the header is translated by `build.zig`). | Build with Zig 0.17.1. |
 
 ## License
 

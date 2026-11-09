@@ -6,8 +6,10 @@
  * module produced by `wasmtk` (e.g. from TypeScript via `wasic`/`modc`),
  * auto-detects the companion `.wit` file, and applies the Canonical ABI so the
  * caller invokes exports by name with native C values. Built on the
- * **wasmtime C API**. Conforms to the cross-language SPEC v3.0.0
- * (callee-allocated string returns + `cabi_post_<name>`).
+ * **wasmtime C API**. Conforms to the cross-language SPEC v4.0.0
+ * (callee-allocated string returns + `cabi_post_<name>`; loud failures: only
+ * an absent `.wit` is raw, every WIT import needs a callback, typed calls and
+ * callback results are checked, never coerced).
  *
  * Intended consumers: C, C++, and — via the C ABI — Zig, V, and Julia.
  *
@@ -120,7 +122,12 @@ void uwl_string_free(char *s);
  * Receives decoded arguments (`args`/`nargs`) and returns a single value.
  * String arguments are decoded from WASM memory and owned by the loader for
  * the duration of the call (do not free them). The returned value is encoded
- * back per the import's WIT result type.
+ * back per the import's WIT result type, and must BE that type's kind (an
+ * `s32` result needs #uwl_i32, a `bool` result #uwl_bool, …): any other kind,
+ * #uwl_void included, is never coerced — it traps, and the #uwl_call of the
+ * export that called the import fails naming the callback, the import, the
+ * result type and the value. An import with no result ignores the value (the
+ * loader frees an owned string either way).
  */
 typedef uwl_val_t (*uwl_host_fn_t)(const uwl_val_t *args, size_t nargs, void *userdata);
 
@@ -144,15 +151,23 @@ typedef struct uwl_module uwl_module_t;
  * Load a `.wasm` module from a file path and return a handle.
  *
  * The companion `.wit` is auto-detected (the trailing `.wasm` is replaced with
- * `.wit`). If found, the Canonical ABI is applied and exports are callable by
- * their camelCase WIT names. If not found, exports are callable by their raw
- * WASM names with no translation.
+ * `.wit`) and read BEFORE the `.wasm`. If found, it must parse completely (the
+ * SPEC §2 grammar; types s32 s64 f32 f64 bool string only), and the Canonical
+ * ABI is applied: exports are callable by their camelCase WIT names, and every
+ * WIT export must exist in the module. Only an ABSENT `.wit` (the file does
+ * not exist, or the path does not end in `.wasm`) gives raw exports, callable
+ * by their WASM names with no translation; any other failure to read it, and
+ * any fault in it, fails the load naming the `.wit` and the reason.
  *
  * A `@N` suffix on `wasm_path` pins to a module version: after instantiation
  * the module's exported `version` i32 global must equal `N` or loading fails.
  *
  * `callbacks`/`ncallbacks` provide host functions for the module's WIT imports,
- * keyed by camelCase name. Pass `NULL`/`0` if the module imports nothing.
+ * keyed by camelCase name. EVERY WIT import needs one (an entry whose `fn` is
+ * NULL counts as none): a missing one fails the load, naming all of them, and
+ * so does a WIT import with a `string` result (not supported). Entries for
+ * names the `.wit` does not import are ignored. Pass `NULL`/`0` if the module
+ * imports nothing.
  *
  * Returns the module on success, or `NULL` on failure with `*err` set to a
  * heap-allocated message (free with #uwl_string_free). `err` may be `NULL`.
@@ -168,6 +183,12 @@ uwl_module_t *uwl_import(const char *wasm_path,
  * was found). `args`/`nargs` are the typed arguments; `*out` receives the
  * return value (kind `UWL_VOID` for void exports). String results are
  * heap-owned — free `*out` with #uwl_val_free.
+ *
+ * With a `.wit`, the count and each argument's kind must match the WIT
+ * signature exactly (`s32` ↔ UWL_I32, `bool` ↔ UWL_BOOL, …; a string must not
+ * be NULL); nothing is coerced, and a mismatch fails naming the export and
+ * the parameter. Raw exports are checked by the engine against the WASM
+ * signature instead.
  *
  * Returns 0 on success, or -1 on failure with `*err` set (free with
  * #uwl_string_free). `err` may be `NULL`.
@@ -200,7 +221,10 @@ void uwl_free(uwl_module_t *m);
  * Errors do not use an out-parameter: on failure the call returns the sentinel
  * (0 / NULL) and sets the thread-local last error, retrievable with
  * #uwl_last_error. A successful call clears it. The result-type suffix must
- * match the export's WIT result type.
+ * match the export's WIT result type; a mismatch is such a failure (e.g.
+ * #uwl_call_i32 on an `f64` export returns 0 with the last error set); check
+ * #uwl_last_error to tell a real 0 from a failure. #uwl_call_void discards any
+ * result.
  */
 int32_t uwl_call_i32 (uwl_module_t *m, const char *name, ...);
 int64_t uwl_call_i64 (uwl_module_t *m, const char *name, ...);
@@ -289,6 +313,7 @@ void uwl_pool_free(uwl_pool_t *p);
  * ========================================================================= */
 #ifdef UWL_IMPLEMENTATION
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -319,19 +344,31 @@ static char *uwl__strdup(const char *s) {
     return p;
 }
 
+/* A heap-allocated formatted message (NULL only when out of memory). */
+static char *uwl__vfmt(const char *fmt, va_list ap) {
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(NULL, 0, fmt, ap2);
+    va_end(ap2);
+    if (n < 0) return uwl__strdup("(error formatting message)");
+    char *buf = (char *)malloc((size_t)n + 1);
+    if (buf) vsnprintf(buf, (size_t)n + 1, fmt, ap);
+    return buf;
+}
+
+static char *uwl__fmt(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    char *s = uwl__vfmt(fmt, ap);
+    va_end(ap);
+    return s;
+}
+
 /* Set *err to a heap-allocated formatted message (no-op if err is NULL). */
 static void uwl__set_err(char **err, const char *fmt, ...) {
     if (!err) return;
-    va_list ap, ap2;
-    va_start(ap, fmt);
-    va_copy(ap2, ap);
-    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_list ap; va_start(ap, fmt);
+    *err = uwl__vfmt(fmt, ap);
     va_end(ap);
-    if (n < 0) { *err = uwl__strdup("(error formatting message)"); va_end(ap2); return; }
-    char *buf = (char *)malloc((size_t)n + 1);
-    if (buf) vsnprintf(buf, (size_t)n + 1, fmt, ap2);
-    va_end(ap2);
-    *err = buf;
 }
 
 /* Copy a wasm_byte_vec_t (not NUL-terminated) into a fresh NUL-terminated string. */
@@ -364,6 +401,18 @@ static void uwl__err_from_trap(char **err, const char *ctx, wasm_trap_t *t) {
     wasm_trap_delete(t);
 }
 
+/* A host-side trap with a formatted message; it reaches the caller of the
+ * export that called the import, through uwl_call's `err`. */
+static wasm_trap_t *uwl__trap_fmt(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    char *s = uwl__vfmt(fmt, ap);
+    va_end(ap);
+    const char *msg = s ? s : "host callback failed (out of memory formatting the error)";
+    wasm_trap_t *t = wasmtime_trap_new(msg, strlen(msg));
+    free(s);
+    return t;
+}
+
 /* ── WIT model ──────────────────────────────────────────────────────────── */
 
 typedef enum { UWL_WT_S32, UWL_WT_S64, UWL_WT_F32, UWL_WT_F64, UWL_WT_BOOL, UWL_WT_STR } uwl_wt_t;
@@ -373,6 +422,7 @@ typedef struct {
     char    *camel;   /* camelCase (export name / user-facing import key) */
     char    *uskey;   /* underscore key (WASM import binary name) */
     uwl_wt_t *params; /* parameter types */
+    char   **pnames;  /* parameter names, camelCase (for error messages) */
     size_t   nparams;
     int      has_result;
     uwl_wt_t result;
@@ -383,25 +433,99 @@ typedef struct {
     uwl_witfunc_t *imports; size_t nimports;
 } uwl_wit_t;
 
-static uwl_wt_t uwl__wt_of(const char *s, size_t n) {
-    if (n == 3 && !strncmp(s, "s32", 3)) return UWL_WT_S32;
-    if (n == 3 && !strncmp(s, "s64", 3)) return UWL_WT_S64;
-    if (n == 3 && !strncmp(s, "f32", 3)) return UWL_WT_F32;
-    if (n == 3 && !strncmp(s, "f64", 3)) return UWL_WT_F64;
-    if (n == 4 && !strncmp(s, "bool", 4)) return UWL_WT_BOOL;
-    if (n == 6 && !strncmp(s, "string", 6)) return UWL_WT_STR;
-    return UWL_WT_S32; /* default, mirrors the reference parser */
+/* SPEC 4.0.0 §2: only these six types; anything else (`u32`, `list<u8>`) is an
+ * error, never read as another type. Returns 0 for an unsupported type. */
+static int uwl__wt_parse(const char *s, size_t n, uwl_wt_t *out) {
+    if (n == 3 && !strncmp(s, "s32", 3))    { *out = UWL_WT_S32;  return 1; }
+    if (n == 3 && !strncmp(s, "s64", 3))    { *out = UWL_WT_S64;  return 1; }
+    if (n == 3 && !strncmp(s, "f32", 3))    { *out = UWL_WT_F32;  return 1; }
+    if (n == 3 && !strncmp(s, "f64", 3))    { *out = UWL_WT_F64;  return 1; }
+    if (n == 4 && !strncmp(s, "bool", 4))   { *out = UWL_WT_BOOL; return 1; }
+    if (n == 6 && !strncmp(s, "string", 6)) { *out = UWL_WT_STR;  return 1; }
+    return 0;
 }
 
+static const char *uwl__wt_name(uwl_wt_t t) {
+    switch (t) {
+        case UWL_WT_S32:  return "s32";
+        case UWL_WT_S64:  return "s64";
+        case UWL_WT_F32:  return "f32";
+        case UWL_WT_F64:  return "f64";
+        case UWL_WT_BOOL: return "bool";
+        case UWL_WT_STR:  return "string";
+    }
+    return "?";
+}
+
+/* The uwl_val_t kind that carries a WIT type. */
+static uwl_kind_t uwl__kind_of_wt(uwl_wt_t t) {
+    switch (t) {
+        case UWL_WT_S32:  return UWL_I32;
+        case UWL_WT_S64:  return UWL_I64;
+        case UWL_WT_F32:  return UWL_F32;
+        case UWL_WT_F64:  return UWL_F64;
+        case UWL_WT_BOOL: return UWL_BOOL;
+        case UWL_WT_STR:  return UWL_STR;
+    }
+    return UWL_VOID;
+}
+
+/* A kind by its WIT name ("void" for UWL_VOID). */
+static const char *uwl__kind_name(uwl_kind_t k) {
+    switch (k) {
+        case UWL_VOID: return "void";
+        case UWL_I32:  return "s32";
+        case UWL_I64:  return "s64";
+        case UWL_F32:  return "f32";
+        case UWL_F64:  return "f64";
+        case UWL_BOOL: return "bool";
+        case UWL_STR:  return "string";
+    }
+    return "?";
+}
+
+/* The constructor that builds a value of a kind, for error messages. */
+static const char *uwl__kind_ctor(uwl_kind_t k) {
+    switch (k) {
+        case UWL_VOID: return "uwl_void";
+        case UWL_I32:  return "uwl_i32";
+        case UWL_I64:  return "uwl_i64";
+        case UWL_F32:  return "uwl_f32";
+        case UWL_F64:  return "uwl_f64";
+        case UWL_BOOL: return "uwl_bool";
+        case UWL_STR:  return "uwl_str";
+    }
+    return "?";
+}
+
+/* A value as text with its kind, e.g. `2.9 (f64)`, `"17" (string)`. */
+static char *uwl__show_val(const uwl_val_t *v) {
+    switch (v->kind) {
+        case UWL_VOID: return uwl__strdup("no value (void)");
+        case UWL_I32:  return uwl__fmt("%d (s32)", (int)v->as.i32);
+        case UWL_I64:  return uwl__fmt("%lld (s64)", (long long)v->as.i64);
+        case UWL_F32:  return uwl__fmt("%g (f32)", (double)v->as.f32);
+        case UWL_F64:  return uwl__fmt("%g (f64)", v->as.f64);
+        case UWL_BOOL: return uwl__fmt("%s (bool)", v->as.b ? "true" : "false");
+        case UWL_STR:  return uwl__fmt("\"%.*s\" (string)", (int)(v->len > 60 ? 60 : v->len),
+                                       v->str ? v->str : "");
+    }
+    return uwl__fmt("an invalid value (kind %d)", (int)v->kind);
+}
+
+/* kebab-case → camelCase as the reference does: a '-' followed by [a-z0-9] is
+ * dropped and the next letter upper-cased; any other '-' stays. */
 static char *uwl__kebab_to_camel(const char *s, size_t n) {
     char *out = (char *)malloc(n + 1);
     if (!out) return NULL;
-    size_t j = 0; int up = 0;
+    size_t j = 0;
     for (size_t i = 0; i < n; i++) {
         char c = s[i];
-        if (c == '-') { up = 1; continue; }
-        if (up && c >= 'a' && c <= 'z') { c = (char)(c - 'a' + 'A'); }
-        up = 0;
+        if (c == '-' && i + 1 < n &&
+            ((s[i + 1] >= 'a' && s[i + 1] <= 'z') || (s[i + 1] >= '0' && s[i + 1] <= '9'))) {
+            c = s[++i];
+            if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        }
         out[j++] = c;
     }
     out[j] = '\0';
@@ -416,125 +540,309 @@ static char *uwl__kebab_to_underscore(const char *s, size_t n) {
     return out;
 }
 
-static int uwl__is_ident(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-           (c >= '0' && c <= '9') || c == '-' || c == '_';
+/* ── strict WIT parser (SPEC 4.0.0 §2 "Parsing") ─────────────────────────────
+ *
+ *   wit   ::= ("package" name ";")? "world" ident "{" (func ";")* "}"
+ *   func  ::= ("import" | "export") ident ":" "func" "(" (param ("," param)* ","?)? ")" ("->" type)?
+ *   param ::= ident ":" type
+ *   type  ::= s32 | s64 | f32 | f64 | bool | string
+ *
+ * `//` comments anywhere. Anything else fails with a reason (the caller names
+ * the .wit). The same accepted forms and messages as the reference
+ * (universalWasmLoader-js `wit-parser.js`). Texts are (pointer, length) pairs:
+ * nothing below relies on a NUL terminator. */
+
+static int uwl__ws(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
 
-/* Parse the comma-separated params substring "a: s32, b: f64" → types. */
-static void uwl__parse_params(const char *s, size_t n, uwl_witfunc_t *f) {
-    f->params = NULL; f->nparams = 0;
-    /* count commas+1 if non-empty */
-    size_t start = 0; while (start < n && (s[start]==' '||s[start]=='\t')) start++;
-    if (start >= n) return;
-    size_t cap = 1;
-    for (size_t i = 0; i < n; i++) if (s[i] == ',') cap++;
-    f->params = (uwl_wt_t *)malloc(cap * sizeof(uwl_wt_t));
-    if (!f->params) return;
-    size_t i = 0;
-    while (i < n) {
-        /* skip ws */
-        while (i < n && (s[i]==' '||s[i]=='\t')) i++;
-        if (i >= n) break;
-        /* name (until ':') */
-        while (i < n && s[i] != ':' && s[i] != ',') i++;
-        if (i >= n || s[i] != ':') { /* malformed; bail */ break; }
-        i++; /* skip ':' */
-        while (i < n && (s[i]==' '||s[i]=='\t')) i++;
-        size_t ts = i;
-        while (i < n && uwl__is_ident(s[i])) i++;
-        f->params[f->nparams++] = uwl__wt_of(s + ts, i - ts);
-        /* advance to next comma */
-        while (i < n && s[i] != ',') i++;
-        if (i < n) i++; /* skip ',' */
-    }
+static int uwl__alnum(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
 }
 
-/* Scan `body` for declarations introduced by `keyword` ("export"/"import"). */
-static void uwl__parse_funcs(const char *body, const char *keyword,
-                             uwl_witfunc_t **out, size_t *nout) {
-    size_t klen = strlen(keyword);
-    uwl_witfunc_t *arr = NULL; size_t n = 0, cap = 0;
-    const char *p = body;
-    while ((p = strstr(p, keyword)) != NULL) {
-        /* must be a whole word */
-        int left_ok = (p == body) || !uwl__is_ident(p[-1]);
-        const char *q = p + klen;
-        int right_ok = (*q == ' ' || *q == '\t');
-        if (!left_ok || !right_ok) { p = q; continue; }
-        const char *c = q;
-        while (*c == ' ' || *c == '\t') c++;
-        /* name */
-        const char *ns = c;
-        while (*c && uwl__is_ident(*c)) c++;
-        size_t namelen = (size_t)(c - ns);
-        if (namelen == 0) { p = q; continue; }
-        while (*c == ' ' || *c == '\t') c++;
-        if (*c != ':') { p = q; continue; }
-        c++;
-        while (*c == ' ' || *c == '\t') c++;
-        if (strncmp(c, "func", 4) != 0) { p = q; continue; }
-        c += 4;
-        while (*c == ' ' || *c == '\t') c++;
-        if (*c != '(') { p = q; continue; }
-        const char *ps = c + 1;
-        const char *pe = strchr(ps, ')');
-        if (!pe) break;
-        /* optional -> result */
-        const char *r = pe + 1;
-        while (*r == ' ' || *r == '\t') r++;
-        int has_result = 0; uwl_wt_t result = UWL_WT_S32;
-        if (r[0] == '-' && r[1] == '>') {
-            r += 2;
-            while (*r == ' ' || *r == '\t') r++;
-            const char *rs = r;
-            while (*r && uwl__is_ident(*r)) r++;
-            has_result = 1;
-            result = uwl__wt_of(rs, (size_t)(r - rs));
-        }
-
-        if (n == cap) {
-            cap = cap ? cap * 2 : 4;
-            arr = (uwl_witfunc_t *)realloc(arr, cap * sizeof(uwl_witfunc_t));
-        }
-        uwl_witfunc_t *f = &arr[n++];
-        memset(f, 0, sizeof(*f));
-        f->kebab = (char *)malloc(namelen + 1);
-        memcpy(f->kebab, ns, namelen); f->kebab[namelen] = '\0';
-        f->camel = uwl__kebab_to_camel(ns, namelen);
-        f->uskey = uwl__kebab_to_underscore(ns, namelen);
-        f->has_result = has_result;
-        f->result = result;
-        uwl__parse_params(ps, (size_t)(pe - ps), f);
-
-        p = pe + 1;
+/* ident: [A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)* */
+static int uwl__ident_ok(const char *s, size_t n) {
+    if (n == 0 || !((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z'))) return 0;
+    for (size_t i = 1; i < n; i++) {
+        if (s[i] == '-') { if (i + 1 >= n || !uwl__alnum(s[i + 1])) return 0; }
+        else if (!uwl__alnum(s[i])) return 0;
     }
-    *out = arr; *nout = n;
+    return 1;
+}
+
+static void uwl__trim(const char **s, size_t *n) {
+    while (*n && uwl__ws(**s)) { (*s)++; (*n)--; }
+    while (*n && uwl__ws((*s)[*n - 1])) (*n)--;
+}
+
+static int uwl__word_at(const char *s, size_t n, const char *word) {
+    size_t w = strlen(word);
+    return n > w && !memcmp(s, word, w) && uwl__ws(s[w]);
+}
+
+/* A run of characters until whitespace or any of `stops`. */
+static size_t uwl__run(const char *s, size_t n, size_t i, const char *stops) {
+    while (i < n && !uwl__ws(s[i]) && !strchr(stops, s[i])) i++;
+    return i;
+}
+
+static size_t uwl__skip_ws(const char *s, size_t n, size_t i) {
+    while (i < n && uwl__ws(s[i])) i++;
+    return i;
+}
+
+/* Statement text with whitespace runs collapsed to one space (for messages). */
+static char *uwl__collapse(const char *s, size_t n) {
+    char *out = (char *)malloc(n + 1);
+    if (!out) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (uwl__ws(s[i])) { if (j && out[j - 1] != ' ') out[j++] = ' '; }
+        else out[j++] = s[i];
+    }
+    out[j] = '\0';
+    return out;
+}
+
+static char *uwl__dupn(const char *s, size_t n) {
+    char *p = (char *)malloc(n + 1);
+    if (p) { memcpy(p, s, n); p[n] = '\0'; }
+    return p;
 }
 
 static void uwl__witfunc_free(uwl_witfunc_t *f) {
+    if (f->pnames) for (size_t i = 0; i < f->nparams; i++) free(f->pnames[i]);
+    free(f->pnames);
     free(f->kebab); free(f->camel); free(f->uskey); free(f->params);
 }
 
-static int uwl__parse_wit(const char *src, uwl_wit_t *wit) {
-    memset(wit, 0, sizeof(*wit));
-    /* find world body between the first "world ... {" and its matching "}" */
-    const char *w = strstr(src, "world");
-    if (!w) return 0;
-    const char *brace = strchr(w, '{');
-    if (!brace) return 0;
-    const char *body = brace + 1;
-    const char *end = strrchr(body, '}');
-    if (!end) end = body + strlen(body);
-    size_t blen = (size_t)(end - body);
-    char *bodyz = (char *)malloc(blen + 1);
-    if (!bodyz) return 0;
-    memcpy(bodyz, body, blen); bodyz[blen] = '\0';
+/* Parse "a: s32, b: f64" into f->params / f->pnames. `label` is e.g.
+ * "export add". Returns 0 with *why set on a fault. */
+static int uwl__parse_params(const char *s, size_t n, uwl_witfunc_t *f,
+                             const char *label, char **why) {
+    size_t cap = 1;
+    for (size_t i = 0; i < n; i++) if (s[i] == ',') cap++;
+    f->params = (uwl_wt_t *)malloc(cap * sizeof(uwl_wt_t));
+    f->pnames = (char **)calloc(cap, sizeof(char *));
+    const char **raw = (const char **)malloc(cap * sizeof(char *));
+    size_t *rawlen = (size_t *)malloc(cap * sizeof(size_t));
+    int ok = 0;
+    if (!f->params || !f->pnames || !raw || !rawlen) { uwl__set_err(why, "out of memory"); goto done; }
 
-    uwl__parse_funcs(bodyz, "import", &wit->imports, &wit->nimports);
-    uwl__parse_funcs(bodyz, "export", &wit->exports, &wit->nexports);
-    free(bodyz);
-    return 1;
+    for (size_t start = 0; start <= n;) {
+        size_t end = start;
+        while (end < n && s[end] != ',') end++;
+        const char *part = s + start; size_t plen = end - start;
+        uwl__trim(&part, &plen);
+        int last = (end >= n);
+        /* an empty LAST part is `func()` or a trailing comma `func(a: s32,)`;
+           an empty part anywhere else is malformed (below) */
+        if (plen == 0 && last) break;
+        /* ^([^:\s]+)\s*:\s*(\S+)$ */
+        size_t i = uwl__run(part, plen, 0, ":");
+        size_t name_end = i;
+        i = uwl__skip_ws(part, plen, i);
+        int shape = name_end > 0 && i < plen && part[i] == ':';
+        size_t ts = 0, te = 0;
+        if (shape) {
+            ts = uwl__skip_ws(part, plen, i + 1);
+            te = uwl__run(part, plen, ts, "");
+            shape = te > ts && te == plen;
+        }
+        if (!shape || !uwl__ident_ok(part, name_end)) {
+            uwl__set_err(why, "malformed parameter \"%.*s\" in %s (expected \"name: type\")",
+                         (int)plen, part, label);
+            goto done;
+        }
+        for (size_t p = 0; p < f->nparams; p++) {
+            if (rawlen[p] == name_end && !memcmp(raw[p], part, name_end)) {
+                uwl__set_err(why, "duplicate parameter \"%.*s\" in %s", (int)name_end, part, label);
+                goto done;
+            }
+        }
+        uwl_wt_t t;
+        if (!uwl__wt_parse(part + ts, te - ts, &t)) {
+            uwl__set_err(why, "unsupported WIT type \"%.*s\" in %s, parameter %.*s "
+                         "(supported: s32, s64, f32, f64, bool, string)",
+                         (int)(te - ts), part + ts, label, (int)name_end, part);
+            goto done;
+        }
+        raw[f->nparams] = part; rawlen[f->nparams] = name_end;
+        f->pnames[f->nparams] = uwl__kebab_to_camel(part, name_end);
+        f->params[f->nparams++] = t;
+        if (last) break;
+        start = end + 1;
+    }
+    ok = 1;
+done:
+    free(raw); free(rawlen);
+    return ok;
+}
+
+/* One statement of the world body, trimmed, without its ';'.
+ * ^(import|export)\s+([^\s:]+)\s*:\s*func\s*\(([^()]*)\)\s*(?:->\s*(\S+))?$ */
+static int uwl__parse_stmt(const char *s, size_t n, uwl_wit_t *wit, char **why) {
+    /* declared up front: no goto below jumps past an initialisation (C++) */
+    int is_import = 0, has_result = 0;
+    size_t i, ns, ne, ps, pe, rs = 0, re = 0;
+    if (uwl__word_at(s, n, "import")) is_import = 1;
+    else if (uwl__word_at(s, n, "export")) is_import = 0;
+    else goto bad;
+    i = uwl__skip_ws(s, n, 6);
+    ns = i; i = uwl__run(s, n, i, ":"); ne = i;
+    if (ne == ns) goto bad;
+    i = uwl__skip_ws(s, n, i);
+    if (i >= n || s[i] != ':') goto bad;
+    i = uwl__skip_ws(s, n, i + 1);
+    if (n - i < 4 || memcmp(s + i, "func", 4)) goto bad;
+    i = uwl__skip_ws(s, n, i + 4);
+    if (i >= n || s[i] != '(') goto bad;
+    ps = ++i;
+    while (i < n && s[i] != '(' && s[i] != ')') i++;
+    if (i >= n || s[i] != ')') goto bad;
+    pe = i++;
+    i = uwl__skip_ws(s, n, i);
+    if (i < n) {
+        if (n - i < 2 || s[i] != '-' || s[i + 1] != '>') goto bad;
+        rs = uwl__skip_ws(s, n, i + 2);
+        re = uwl__run(s, n, rs, "");
+        if (re == rs || re != n) goto bad;
+        has_result = 1;
+    }
+
+    {
+        const char *kw = is_import ? "import" : "export";
+        char *label = uwl__fmt("%s %.*s", kw, (int)(ne - ns), s + ns);
+        if (!label) { uwl__set_err(why, "out of memory"); return 0; }
+        uwl_witfunc_t **list = is_import ? &wit->imports : &wit->exports;
+        size_t *count = is_import ? &wit->nimports : &wit->nexports;
+        int ok = 0;
+        uwl_witfunc_t f; memset(&f, 0, sizeof(f));
+        uwl_witfunc_t *grown = NULL;
+
+        if (!uwl__ident_ok(s + ns, ne - ns)) { uwl__set_err(why, "malformed function name in %s", label); goto out; }
+        for (size_t k = 0; k < *count; k++) {
+            if (strlen((*list)[k].kebab) == ne - ns && !memcmp((*list)[k].kebab, s + ns, ne - ns)) {
+                uwl__set_err(why, "duplicate %s", label); goto out;
+            }
+        }
+        if (!uwl__parse_params(s + ps, pe - ps, &f, label, why)) goto out;
+        if (has_result) {
+            if (!uwl__wt_parse(s + rs, re - rs, &f.result)) {
+                uwl__set_err(why, "unsupported WIT type \"%.*s\" in %s, result "
+                             "(supported: s32, s64, f32, f64, bool, string)",
+                             (int)(re - rs), s + rs, label);
+                goto out;
+            }
+            f.has_result = 1;
+        }
+        f.kebab = uwl__dupn(s + ns, ne - ns);
+        f.camel = uwl__kebab_to_camel(s + ns, ne - ns);
+        f.uskey = uwl__kebab_to_underscore(s + ns, ne - ns);
+        grown = (uwl_witfunc_t *)realloc(*list, (*count + 1) * sizeof(uwl_witfunc_t));
+        if (!f.kebab || !f.camel || !f.uskey || !grown) {
+            if (grown) *list = grown;
+            uwl__set_err(why, "out of memory"); goto out;
+        }
+        *list = grown;
+        (*list)[(*count)++] = f;
+        memset(&f, 0, sizeof(f)); /* now owned by the list */
+        ok = 1;
+    out:
+        uwl__witfunc_free(&f);
+        free(label);
+        return ok;
+    }
+
+bad: {
+        char *shown = uwl__collapse(s, n);
+        uwl__set_err(why, "unsupported or malformed WIT statement: %s", shown ? shown : "?");
+        free(shown);
+        return 0;
+    }
+}
+
+static void uwl__wit_free(uwl_wit_t *wit);
+
+/* Parse `src` (`len` bytes). Returns 1, or 0 with *why set and `wit` empty. */
+static int uwl__parse_wit(const char *src, size_t len, uwl_wit_t *wit, char **why) {
+    memset(wit, 0, sizeof(*wit));
+    if (memchr(src, '\0', len)) { uwl__set_err(why, "not a text file (it contains a NUL byte)"); return 0; }
+    size_t off = (len >= 3 && (unsigned char)src[0] == 0xEF && (unsigned char)src[1] == 0xBB &&
+                  (unsigned char)src[2] == 0xBF) ? 3 : 0;
+    size_t n = len - off;
+    char *code = (char *)malloc(n + 1);
+    if (!code) { uwl__set_err(why, "out of memory"); return 0; }
+    for (size_t i = 0; i < n;) {   /* blank out `//` comments */
+        if (src[off + i] == '/' && i + 1 < n && src[off + i + 1] == '/') {
+            while (i < n && src[off + i] != '\n') code[i++] = ' ';
+        } else { code[i] = src[off + i]; i++; }
+    }
+    code[n] = '\0';
+
+    int ok = 0;
+    const char *p = code; size_t pn = n;
+    uwl__trim(&p, &pn);
+
+    /* ("package" name ";")? — a malformed one is left for the world check */
+    if (uwl__word_at(p, pn, "package")) {
+        size_t i = uwl__skip_ws(p, pn, 7);
+        size_t ns = i; i = uwl__run(p, pn, i, ";"); size_t ne = i;
+        i = uwl__skip_ws(p, pn, i);
+        if (ne > ns && i < pn && p[i] == ';') { p += i + 1; pn -= i + 1; uwl__trim(&p, &pn); }
+    }
+
+    /* ^world\s+([^\s{]+)\s*\{([^{}]*)\}$ */
+    size_t ws_ = 0, we = 0, bs = 0, be = 0;
+    int shape = uwl__word_at(p, pn, "world");
+    if (shape) {
+        size_t i = uwl__skip_ws(p, pn, 5);
+        ws_ = i; i = uwl__run(p, pn, i, "{"); we = i;
+        i = uwl__skip_ws(p, pn, i);
+        shape = we > ws_ && i < pn && p[i] == '{';
+        if (shape) {
+            bs = i + 1; be = bs;
+            while (be < pn && p[be] != '{' && p[be] != '}') be++;
+            shape = be < pn && p[be] == '}' && be == pn - 1;
+        }
+    }
+    if (!shape) {
+        if (pn == 0) uwl__set_err(why, "not a WIT world: it is empty");
+        else uwl__set_err(why, "not a WIT world: expected one \"world <name> { ... }\" block, found: %.*s",
+                          (int)(pn > 60 ? 60 : pn), p);
+        goto done;
+    }
+    if (!uwl__ident_ok(p + ws_, we - ws_)) {
+        uwl__set_err(why, "malformed world name \"%.*s\"", (int)(we - ws_), p + ws_);
+        goto done;
+    }
+
+    {   /* statements: the text after the last ';' must be blank */
+        size_t last = be;
+        for (size_t i = bs; i < be; i++) if (p[i] == ';') last = i;
+        const char *tail = p + (last == be ? bs : last + 1);
+        size_t tn = (size_t)((p + be) - tail);
+        uwl__trim(&tail, &tn);
+        if (tn) {
+            char *shown = uwl__collapse(tail, tn);
+            uwl__set_err(why, "unterminated WIT statement (missing \";\"): %s", shown ? shown : "?");
+            free(shown);
+            goto done;
+        }
+        for (size_t s = bs; last != be && s <= last;) {
+            size_t e = s;
+            while (p[e] != ';') e++;
+            const char *st = p + s; size_t sn = e - s;
+            uwl__trim(&st, &sn);
+            if (!uwl__parse_stmt(st, sn, wit, why)) goto done;
+            s = e + 1;
+        }
+    }
+    ok = 1;
+done:
+    free(code);
+    if (!ok) uwl__wit_free(wit);
+    return ok;
 }
 
 static void uwl__wit_free(uwl_wit_t *wit) {
@@ -635,47 +943,64 @@ static wasm_trap_t *uwl__import_trampoline(void *env, wasmtime_caller_t *caller,
         }
     }
 
+    /* Every import has a callback (uwl__bind_imports refuses the load
+       otherwise); this guards a binding built some other way. */
+    if (!b->user_fn) return uwl__trap_fmt("no host callback for WIT import: %s (WIT \"%s\")", f->camel, f->kebab);
+
     /* Decode arguments. */
     uwl_val_t stackvals[8];
     uwl_val_t *vals = (f->nparams <= 8) ? stackvals
                                         : (uwl_val_t *)malloc(f->nparams * sizeof(uwl_val_t));
-    size_t ai = 0;
-    for (size_t i = 0; i < f->nparams; i++) {
+    if (!vals) return uwl__trap_fmt("out of memory decoding the arguments of import \"%s\"", f->kebab);
+    size_t ai = 0, nvals = 0;
+    wasm_trap_t *fault = NULL;
+    for (size_t i = 0; i < f->nparams && !fault; i++) {
         switch (f->params[i]) {
             case UWL_WT_STR: {
                 int32_t ptr = args[ai++].of.i32;
                 int32_t len = args[ai++].of.i32;
-                char *s = NULL;
-                if (mem_data && ptr >= 0 && len >= 0 &&
-                    (size_t)ptr + (size_t)len <= mem_size) {
-                    s = (char *)malloc((size_t)len + 1);
-                    if (s) { memcpy(s, mem_data + ptr, (size_t)len); s[len] = '\0'; }
+                if (!mem_data) {
+                    fault = uwl__trap_fmt("import \"%s\" received a string but the module exports no memory", f->kebab);
+                } else if (ptr < 0 || len < 0 || (size_t)ptr + (size_t)len > mem_size) {
+                    fault = uwl__trap_fmt("import \"%s\" received a string out of bounds (ptr %d, len %d, memory %zu bytes)",
+                                          f->kebab, (int)ptr, (int)len, mem_size);
+                } else {
+                    vals[nvals++] = uwl_strn((const char *)(mem_data + ptr), (size_t)len);
                 }
-                vals[i] = uwl_strn(s ? s : "", s ? (size_t)len : 0);
-                free(s);
                 break;
             }
-            case UWL_WT_BOOL: vals[i] = uwl_bool(args[ai++].of.i32 != 0); break;
-            case UWL_WT_S64:  vals[i] = uwl_i64(args[ai++].of.i64); break;
-            case UWL_WT_F32:  vals[i] = uwl_f32(args[ai++].of.f32); break;
-            case UWL_WT_F64:  vals[i] = uwl_f64(args[ai++].of.f64); break;
-            default:          vals[i] = uwl_i32(args[ai++].of.i32); break; /* s32 */
+            case UWL_WT_BOOL: vals[nvals++] = uwl_bool(args[ai++].of.i32 != 0); break;
+            case UWL_WT_S64:  vals[nvals++] = uwl_i64(args[ai++].of.i64); break;
+            case UWL_WT_F32:  vals[nvals++] = uwl_f32(args[ai++].of.f32); break;
+            case UWL_WT_F64:  vals[nvals++] = uwl_f64(args[ai++].of.f64); break;
+            default:          vals[nvals++] = uwl_i32(args[ai++].of.i32); break; /* s32 */
         }
     }
 
-    /* Invoke the user callback (or default-zero if none registered). */
-    uwl_val_t ret;
-    if (b->user_fn) ret = b->user_fn(vals, f->nparams, b->userdata);
-    else            ret = uwl_void();
+    uwl_val_t ret = uwl_void();
+    if (!fault) ret = b->user_fn(vals, f->nparams, b->userdata);
 
-    for (size_t i = 0; i < f->nparams; i++) uwl_val_free(&vals[i]);
+    for (size_t i = 0; i < nvals; i++) uwl_val_free(&vals[i]);
     if (vals != stackvals) free(vals);
+    if (fault) return fault;
 
-    /* Encode the result. String returns from host imports are not supported
-       (no fixture needs them; would require writing into WASM memory). */
-    if (nresults >= 1 && f->has_result) {
+    /* SPEC 4.0.0 §4: the return value must be the import's WIT result kind,
+       never coerced. A void import ignores it. A `string` result never gets
+       here: such an import is refused at load. */
+    if (f->has_result) {
+        uwl_kind_t want = uwl__kind_of_wt(f->result);
+        if (ret.kind != want || nresults < 1) {
+            char *shown = uwl__show_val(&ret);
+            wasm_trap_t *t = uwl__trap_fmt(
+                "host callback %s (WIT import \"%s\" -> %s) returned %s; expected %s (%s)",
+                f->camel, f->kebab, uwl__wt_name(f->result), shown ? shown : "?",
+                uwl__kind_name(want), uwl__kind_ctor(want));
+            free(shown);
+            uwl_val_free(&ret);
+            return t;
+        }
         switch (f->result) {
-            case UWL_WT_BOOL: results[0].kind = WASMTIME_I32; results[0].of.i32 = (ret.kind==UWL_BOOL ? ret.as.b : ret.as.i32) ? 1 : 0; break;
+            case UWL_WT_BOOL: results[0].kind = WASMTIME_I32; results[0].of.i32 = ret.as.b ? 1 : 0; break;
             case UWL_WT_S64:  results[0].kind = WASMTIME_I64; results[0].of.i64 = ret.as.i64; break;
             case UWL_WT_F32:  results[0].kind = WASMTIME_F32; results[0].of.f32 = ret.as.f32; break;
             case UWL_WT_F64:  results[0].kind = WASMTIME_F64; results[0].of.f64 = ret.as.f64; break;
@@ -684,6 +1009,63 @@ static wasm_trap_t *uwl__import_trampoline(void *env, wasmtime_caller_t *caller,
     }
     uwl_val_free(&ret);
     return NULL;
+}
+
+/* A comma-separated "camel (WIT \"kebab\")" list of the selected functions. */
+static char *uwl__func_list(const uwl_witfunc_t *const *sel, size_t n) {
+    size_t cap = 1;
+    for (size_t i = 0; i < n; i++) cap += strlen(sel[i]->camel) + strlen(sel[i]->kebab) + 12;
+    char *out = (char *)malloc(cap);
+    if (!out) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < n; i++)
+        j += (size_t)snprintf(out + j, cap - j, "%s%s (WIT \"%s\")", i ? ", " : "",
+                              sel[i]->camel, sel[i]->kebab);
+    out[j] = '\0';
+    return out;
+}
+
+/* SPEC 4.0.0 §4: bind a callback to every WIT import, before the .wasm is
+ * read. Refuses, naming every one, an import with no callback (a NULL `fn`
+ * counts as none) and an import with a `string` result (not supported by this
+ * ABI profile). Callbacks for names the .wit does not import are ignored. */
+static int uwl__bind_imports(uwl_module_t *m, const uwl_host_callback_t *callbacks,
+                             size_t ncallbacks, char **err) {
+    size_t n = m->wit.nimports;
+    if (!n) return 1;
+    m->bindings = (uwl_binding_t *)calloc(n, sizeof(uwl_binding_t));
+    const uwl_witfunc_t **missing = (const uwl_witfunc_t **)malloc(n * sizeof(*missing));
+    const uwl_witfunc_t **strres = (const uwl_witfunc_t **)malloc(n * sizeof(*strres));
+    if (!m->bindings || !missing || !strres) {
+        free(missing); free(strres);
+        uwl__set_err(err, "out of memory"); return 0;
+    }
+    m->nbindings = n;
+    size_t nmissing = 0, nstr = 0;
+    for (size_t i = 0; i < n; i++) {
+        const uwl_witfunc_t *f = &m->wit.imports[i];
+        uwl_binding_t *b = &m->bindings[i];
+        b->mod = m; b->fn = f;
+        for (size_t c = 0; c < ncallbacks && callbacks; c++) {
+            if (callbacks[c].name && callbacks[c].fn && !strcmp(callbacks[c].name, f->camel)) {
+                b->user_fn = callbacks[c].fn; b->userdata = callbacks[c].userdata; break;
+            }
+        }
+        if (!b->user_fn) missing[nmissing++] = f;
+        if (f->has_result && f->result == UWL_WT_STR) strres[nstr++] = f;
+    }
+    int ok = 1;
+    if (nmissing) {
+        char *names = uwl__func_list(missing, nmissing);
+        uwl__set_err(err, "no host callback for WIT import%s: %s", nmissing > 1 ? "s" : "", names ? names : "?");
+        free(names); ok = 0;
+    } else if (nstr) {
+        char *names = uwl__func_list(strres, nstr);
+        uwl__set_err(err, "a WIT import returning a string is not supported: %s", names ? names : "?");
+        free(names); ok = 0;
+    }
+    free(missing); free(strres);
+    return ok;
 }
 
 /* ── path handling ──────────────────────────────────────────────────────── */
@@ -710,35 +1092,50 @@ static char *uwl__strip_version(const char *path, long *out_version) {
     return uwl__strdup(path);
 }
 
-/* Derive the companion .wit path from a clean .wasm path. */
-static char *uwl__wit_path(const char *wasm_path) {
+/* The companion .wit path of a clean .wasm path: the trailing `.wasm` replaced
+ * by `.wit`. A path that does not end in `.wasm` has no companion (SPEC §2):
+ * NULL, and *oom stays 0. NULL with *oom = 1 is an allocation failure. */
+static char *uwl__wit_path(const char *wasm_path, int *oom) {
+    *oom = 0;
     size_t n = strlen(wasm_path);
-    if (n >= 5 && !strcmp(wasm_path + n - 5, ".wasm")) {
-        char *w = (char *)malloc(n + 1);
-        memcpy(w, wasm_path, n - 5);
-        memcpy(w + n - 5, ".wit", 5); /* includes NUL */
-        return w;
-    }
-    /* no .wasm suffix: append .wit */
-    char *w = (char *)malloc(n + 5);
-    memcpy(w, wasm_path, n);
-    memcpy(w + n, ".wit", 5);
+    if (n < 5 || strcmp(wasm_path + n - 5, ".wasm") != 0) return NULL;
+    char *w = (char *)malloc(n);
+    if (!w) { *oom = 1; return NULL; }
+    memcpy(w, wasm_path, n - 5);
+    memcpy(w + n - 5, ".wit", 5); /* includes NUL */
     return w;
 }
 
-static char *uwl__read_file(const char *path, size_t *out_len) {
+/* Read a whole file. NULL on failure with *out_errno set (ENOENT: it does not
+ * exist). Reads in chunks rather than trusting ftell, so a directory or an
+ * unreadable stream fails here instead of reading as empty. */
+static char *uwl__read_file(const char *path, size_t *out_len, int *out_errno) {
+    *out_errno = 0;
+    errno = 0;
     FILE *fp = fopen(path, "rb");
-    if (!fp) return NULL;
-    fseek(fp, 0, SEEK_END);
-    long sz = ftell(fp);
-    if (sz < 0) { fclose(fp); return NULL; }
-    fseek(fp, 0, SEEK_SET);
-    char *buf = (char *)malloc((size_t)sz + 1);
-    if (!buf) { fclose(fp); return NULL; }
-    size_t rd = fread(buf, 1, (size_t)sz, fp);
+    if (!fp) { *out_errno = errno ? errno : EIO; return NULL; }
+    size_t cap = 4096, n = 0;
+    char *buf = (char *)malloc(cap + 1);
+    if (!buf) { fclose(fp); *out_errno = ENOMEM; return NULL; }
+    for (;;) {
+        if (n == cap) {
+            char *nb = (char *)realloc(buf, cap * 2 + 1);
+            if (!nb) { free(buf); fclose(fp); *out_errno = ENOMEM; return NULL; }
+            buf = nb; cap *= 2;
+        }
+        errno = 0;
+        size_t rd = fread(buf + n, 1, cap - n, fp);
+        n += rd;
+        if (rd == 0) break;
+    }
+    if (ferror(fp)) {
+        *out_errno = errno ? errno : EIO;
+        free(buf); fclose(fp);
+        return NULL;
+    }
     fclose(fp);
-    buf[rd] = '\0';
-    if (out_len) *out_len = rd;
+    buf[n] = '\0';
+    if (out_len) *out_len = n;
     return buf;
 }
 
@@ -758,28 +1155,60 @@ uwl_module_t *uwl_import(const char *wasm_path,
                          const uwl_host_callback_t *callbacks, size_t ncallbacks,
                          char **err) {
     if (err) *err = NULL;
+    if (!wasm_path) { uwl__set_err(err, "null wasm_path"); return NULL; }
     long want_version = -1;
     char *clean = uwl__strip_version(wasm_path, &want_version);
+    if (!clean) { uwl__set_err(err, "out of memory"); return NULL; }
 
     size_t wasm_len = 0;
-    char *wasm_bytes = uwl__read_file(clean, &wasm_len);
-    if (!wasm_bytes) { uwl__set_err(err, "failed to read '%s'", clean); free(clean); return NULL; }
-
-    /* optional WIT */
-    char *witp = uwl__wit_path(clean);
-    char *wit_src = uwl__read_file(witp, NULL);
-    free(witp);
-
+    char *wasm_bytes = NULL;
+    wasmtime_error_t *werr = NULL;   /* declared before any goto (C++) */
+    wasmtime_linker_t *linker = NULL;
     uwl_module_t *m = (uwl_module_t *)calloc(1, sizeof(uwl_module_t));
-    if (!m) { uwl__set_err(err, "out of memory"); free(wasm_bytes); free(wit_src); free(clean); return NULL; }
+    if (!m) { uwl__set_err(err, "out of memory"); free(clean); return NULL; }
 
-    if (wit_src) { m->has_wit = uwl__parse_wit(wit_src, &m->wit); free(wit_src); }
+    /* SPEC 4.0.0 §2: the .wit first. Only an ABSENT one (it does not exist)
+       selects raw exports; any other read failure, and any .wit that does not
+       parse, fails the load before the .wasm is read. */
+    {
+        int oom = 0, eno = 0;
+        char *witp = uwl__wit_path(clean, &oom);
+        if (oom) { uwl__set_err(err, "out of memory"); goto fail; }
+        if (witp) {
+            size_t wl = 0;
+            char *src = uwl__read_file(witp, &wl, &eno);
+            if (!src && eno != ENOENT) {
+                uwl__set_err(err, "cannot read .wit '%s': %s", witp, strerror(eno));
+                free(witp); goto fail;
+            }
+            if (src) {
+                char *why = NULL;
+                int ok = uwl__parse_wit(src, wl, &m->wit, &why);
+                free(src);
+                if (!ok) {
+                    uwl__set_err(err, "invalid .wit '%s': %s", witp, why ? why : "out of memory");
+                    free(why); free(witp); goto fail;
+                }
+                m->has_wit = 1;
+            }
+            free(witp);
+        }
+    }
+
+    /* SPEC 4.0.0 §4: every WIT import has a callback, checked before the
+       .wasm is read. */
+    if (m->has_wit && !uwl__bind_imports(m, callbacks, ncallbacks, err)) goto fail;
+
+    {
+        int eno = 0;
+        wasm_bytes = uwl__read_file(clean, &wasm_len, &eno);
+        if (!wasm_bytes) { uwl__set_err(err, "failed to read '%s': %s", clean, strerror(eno)); goto fail; }
+    }
 
     m->engine = wasm_engine_new();
     if (!m->engine) { uwl__set_err(err, "wasm_engine_new failed"); goto fail; }
 
-    wasmtime_error_t *werr =
-        wasmtime_module_new(m->engine, (const uint8_t *)wasm_bytes, wasm_len, &m->module);
+    werr = wasmtime_module_new(m->engine, (const uint8_t *)wasm_bytes, wasm_len, &m->module);
     if (werr) { uwl__err_from_wasmtime(err, "compile", werr); goto fail; }
 
     m->store = wasmtime_store_new(m->engine, NULL, NULL);
@@ -797,26 +1226,18 @@ uwl_module_t *uwl_import(const char *wasm_path,
         }
     }
 
-    wasmtime_linker_t *linker = wasmtime_linker_new(m->engine);
+    linker = wasmtime_linker_new(m->engine);
     if (!linker) { uwl__set_err(err, "wasmtime_linker_new failed"); goto fail; }
     {
         wasmtime_error_t *we = wasmtime_linker_define_wasi(linker);
         if (we) wasmtime_error_delete(we);
     }
 
-    /* Define host import callbacks under "env" for each WIT import. */
-    if (m->has_wit && m->wit.nimports) {
-        m->bindings = (uwl_binding_t *)calloc(m->wit.nimports, sizeof(uwl_binding_t));
-        m->nbindings = m->wit.nimports;
-        for (size_t i = 0; i < m->wit.nimports; i++) {
-            uwl_witfunc_t *f = &m->wit.imports[i];
+    /* Define the bound host callbacks under "env" for each WIT import. */
+    if (m->has_wit) {
+        for (size_t i = 0; i < m->nbindings; i++) {
+            const uwl_witfunc_t *f = m->bindings[i].fn;
             uwl_binding_t *b = &m->bindings[i];
-            b->mod = m; b->fn = f; b->user_fn = NULL; b->userdata = NULL;
-            for (size_t c = 0; c < ncallbacks; c++) {
-                if (callbacks[c].name && !strcmp(callbacks[c].name, f->camel)) {
-                    b->user_fn = callbacks[c].fn; b->userdata = callbacks[c].userdata; break;
-                }
-            }
             wasm_functype_t *ft = uwl__functype_for(f);
             wasmtime_error_t *we = wasmtime_linker_define_func(
                 linker, "env", 3, f->uskey, strlen(f->uskey), ft,
@@ -882,6 +1303,28 @@ uwl_module_t *uwl_import(const char *wasm_path,
         }
     }
 
+    /* SPEC 4.0.0 §2: a WIT export the module does not export fails the load,
+       naming every one. */
+    if (m->has_wit && m->wit.nexports) {
+        const uwl_witfunc_t **absent =
+            (const uwl_witfunc_t **)malloc(m->wit.nexports * sizeof(*absent));
+        if (!absent) { uwl__set_err(err, "out of memory"); goto fail; }
+        size_t nabsent = 0;
+        for (size_t i = 0; i < m->wit.nexports; i++) {
+            wasmtime_func_t fn;
+            const uwl_witfunc_t *f = &m->wit.exports[i];
+            if (!uwl__lookup_func(m, f->camel, strlen(f->camel), &fn)) absent[nabsent++] = f;
+        }
+        if (nabsent) {
+            char *names = uwl__func_list(absent, nabsent);
+            uwl__set_err(err, "the .wit declares export%s the module does not export: %s",
+                         nabsent > 1 ? "s" : "", names ? names : "?");
+            free(names); free(absent);
+            goto fail;
+        }
+        free(absent);
+    }
+
     free(wasm_bytes);
     free(clean);
     return m;
@@ -945,6 +1388,23 @@ int uwl_call(uwl_module_t *m, const char *name,
     if (nargs != f->nparams) {
         uwl__set_err(err, "export '%s' expects %zu args, got %zu", name, f->nparams, nargs);
         return -1;
+    }
+    if (nargs && !args) { uwl__set_err(err, "export '%s': args is NULL", name); return -1; }
+
+    /* SPEC 4.0.0 §4: each argument is the kind its WIT parameter declares,
+       never coerced (a uwl_i32 for an f64 parameter is an error, not 2.0). */
+    for (size_t i = 0; i < f->nparams; i++) {
+        uwl_kind_t want = uwl__kind_of_wt(f->params[i]);
+        if (args[i].kind != want) {
+            uwl__set_err(err, "export '%s' parameter '%s' is %s, got %s (build it with %s)",
+                         name, f->pnames[i], uwl__wt_name(f->params[i]),
+                         uwl__kind_name(args[i].kind), uwl__kind_ctor(want));
+            return -1;
+        }
+        if (want == UWL_STR && !args[i].str) {
+            uwl__set_err(err, "export '%s' parameter '%s' is string, got a NULL string", name, f->pnames[i]);
+            return -1;
+        }
     }
 
     wasmtime_func_t func;
@@ -1138,23 +1598,32 @@ static int uwl__call_va(uwl_module_t *m, const char *name, uwl_val_t *out, va_li
         uwl__tls_set(e); return -1;
     }
 
+    /* C varargs carry no types: each is read as the WIT parameter declares, so
+       the caller must pass that C type. A NULL `const char *` for a string
+       parameter is refused rather than sent as "". */
     uwl_val_t *args = f->nparams ? (uwl_val_t *)malloc(f->nparams * sizeof(uwl_val_t)) : NULL;
     if (f->nparams && !args) { uwl__tls_set(uwl__strdup("out of memory")); return -1; }
-    for (size_t i = 0; i < f->nparams; i++) {
+    size_t built = 0;
+    char *err = NULL;
+    for (size_t i = 0; i < f->nparams && !err; i++) {
         switch (f->params[i]) {
-            case UWL_WT_STR:  args[i] = uwl_str(va_arg(ap, const char *)); break;
-            case UWL_WT_BOOL: args[i] = uwl_bool(va_arg(ap, int)); break;
-            case UWL_WT_S64:  args[i] = uwl_i64(va_arg(ap, int64_t)); break;
-            case UWL_WT_F32:  args[i] = uwl_f32((float)va_arg(ap, double)); break;
-            case UWL_WT_F64:  args[i] = uwl_f64(va_arg(ap, double)); break;
-            default:          args[i] = uwl_i32(va_arg(ap, int32_t)); break; /* s32 */
+            case UWL_WT_STR: {
+                const char *s = va_arg(ap, const char *);
+                if (!s) uwl__set_err(&err, "export '%s' parameter '%s' is string, got NULL", name, f->pnames[i]);
+                else args[built++] = uwl_str(s);
+                break;
+            }
+            case UWL_WT_BOOL: args[built++] = uwl_bool(va_arg(ap, int)); break;
+            case UWL_WT_S64:  args[built++] = uwl_i64(va_arg(ap, int64_t)); break;
+            case UWL_WT_F32:  args[built++] = uwl_f32((float)va_arg(ap, double)); break;
+            case UWL_WT_F64:  args[built++] = uwl_f64(va_arg(ap, double)); break;
+            default:          args[built++] = uwl_i32(va_arg(ap, int32_t)); break; /* s32 */
         }
     }
 
-    char *err = NULL;
-    int rc = uwl_call(m, name, args, f->nparams, out, &err);
+    int rc = err ? -1 : uwl_call(m, name, args, f->nparams, out, &err);
 
-    for (size_t i = 0; i < f->nparams; i++)
+    for (size_t i = 0; i < built; i++)
         if (args[i].kind == UWL_STR) uwl_val_free(&args[i]);
     free(args);
 
@@ -1162,9 +1631,27 @@ static int uwl__call_va(uwl_module_t *m, const char *name, uwl_val_t *out, va_li
     return rc;
 }
 
+/* uwl__call_va, then require the result kind the accessor reads: a mismatch is
+ * an error (sentinel + last error), never the union read as the wrong member
+ * (workspace H29 / S8: call_i32 on an f64 export returned 0, call_bool on an
+ * s32 export returned the integer). Returns 0 on success, -1 on failure. */
+static int uwl__call_expect(uwl_module_t *m, const char *name, uwl_kind_t want,
+                            uwl_val_t *out, va_list ap) {
+    int rc = uwl__call_va(m, name, out, ap);
+    if (rc == 0 && out->kind != want) {
+        char *e = NULL;
+        uwl__set_err(&e, "export '%s' returns %s, not %s", name,
+                     uwl__kind_name(out->kind), uwl__kind_name(want));
+        uwl__tls_set(e);
+        uwl_val_free(out);
+        return -1;
+    }
+    return rc;
+}
+
 int32_t uwl_call_i32(uwl_module_t *m, const char *name, ...) {
     va_list ap; va_start(ap, name);
-    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    uwl_val_t out; int rc = uwl__call_expect(m, name, UWL_I32, &out, ap);
     va_end(ap);
     int32_t r = (rc == 0) ? uwl_as_i32(out) : 0;
     uwl_val_free(&out);
@@ -1173,7 +1660,7 @@ int32_t uwl_call_i32(uwl_module_t *m, const char *name, ...) {
 
 int64_t uwl_call_i64(uwl_module_t *m, const char *name, ...) {
     va_list ap; va_start(ap, name);
-    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    uwl_val_t out; int rc = uwl__call_expect(m, name, UWL_I64, &out, ap);
     va_end(ap);
     int64_t r = (rc == 0) ? uwl_as_i64(out) : 0;
     uwl_val_free(&out);
@@ -1182,7 +1669,7 @@ int64_t uwl_call_i64(uwl_module_t *m, const char *name, ...) {
 
 float uwl_call_f32(uwl_module_t *m, const char *name, ...) {
     va_list ap; va_start(ap, name);
-    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    uwl_val_t out; int rc = uwl__call_expect(m, name, UWL_F32, &out, ap);
     va_end(ap);
     float r = (rc == 0) ? uwl_as_f32(out) : 0.0f;
     uwl_val_free(&out);
@@ -1191,7 +1678,7 @@ float uwl_call_f32(uwl_module_t *m, const char *name, ...) {
 
 double uwl_call_f64(uwl_module_t *m, const char *name, ...) {
     va_list ap; va_start(ap, name);
-    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    uwl_val_t out; int rc = uwl__call_expect(m, name, UWL_F64, &out, ap);
     va_end(ap);
     double r = (rc == 0) ? uwl_as_f64(out) : 0.0;
     uwl_val_free(&out);
@@ -1200,7 +1687,7 @@ double uwl_call_f64(uwl_module_t *m, const char *name, ...) {
 
 int uwl_call_bool(uwl_module_t *m, const char *name, ...) {
     va_list ap; va_start(ap, name);
-    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    uwl_val_t out; int rc = uwl__call_expect(m, name, UWL_BOOL, &out, ap);
     va_end(ap);
     int r = (rc == 0) ? uwl_as_bool(out) : 0;
     uwl_val_free(&out);
