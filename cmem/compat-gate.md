@@ -25,6 +25,12 @@ the SPEC version from the header's leading comment (exactly once, as -c reads it
 cannot key is a compile error, never skipped. **112 symbols, SPEC 3.0.0, on 2026-10-26; 118 symbols,
 SPEC 4.0.0, on 2026-11-08** (`importWith`, `lastError`, `HostCallback` + 3 fields; `8eae638`).
 Floor vs `v1.0.0` on 2026-11-08: **major** (`bump patch` refused, `bump major --dry-run` allowed).
+**120 symbols since `14d1fad`** (C loader 2.1.0: `c.UWL_ERR`, `c.uwl_err`). Floor vs `v2.0.0`:
+**minor**, read from the tag's committed `api-surface.txt` (the snapshot path's first real use).
+**Rule 3's first real run, 2026-11-08:** `v2.0.0` is the first tag that carries
+`tests/uwl_test.zig`, and its 23 tests, unmodified, ran green on today's src (`compat.ts`:
+`GREEN — 23 passed, 0 failed, exit 0`), so a patch / minor after v2.0.0 is now gated on behaviour,
+not only on the surface.
 ⚠️ A generic function's return type is invisible to reflection (`Module.call` prints `generic`);
 Rule 3 is what sees a change there.
 

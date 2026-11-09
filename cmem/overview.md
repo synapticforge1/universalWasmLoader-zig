@@ -46,13 +46,14 @@ Working tree:
 - `src/uwl_impl.c` — 3-line TU that `#define UWL_IMPLEMENTATION` + includes the header to compile the
   loader body into the module.
 - `src/universal_wasm_loader.h` — **vendored copy** of the upstream C single-header loader. Keep in
-  sync with the `universalWasmLoader-c` release being targeted. **Provenance (★ 3.8), 2026-11-08:**
-  copied with `git show v2.0.0:universal_wasm_loader.h` from loader-c (tag commit `56217b6`, the
-  tag CI green per its record); sha256
-  `5ffa482da1b788df6b5f4fbeac61ed899bac88ac2a67f6a08f659e2a80ee9e80`, = loader-c's working tree
-  the same day; **SPEC 4.0.0**. Before: `f3af6143…` = loader-c v1.1.1 (= v1.1.0), SPEC 3.0.0,
-  measured 2026-10-26; first copied 2026-06-19 from an unrecorded tag. On the next sync,
-  re-stamp: the -c tag, the sha256, the date.
+  sync with the `universalWasmLoader-c` release being targeted. **Provenance (★ 3.8), 2026-11-08
+  (later the same day, ledger C39):** copied with `git show v2.1.0:universal_wasm_loader.h` from
+  loader-c (tag `v2.1.0^{}` = `edc6993` locally and on its `origin`, `ls-remote`); sha256
+  `01a7ad5e432ac97bd5c83a69a221c6a1e2ef28b7a32160f47638a7ecd9afc14f`, = loader-c's working tree;
+  **SPEC 4.0.0**, adds `uwl_err` / `UWL_ERR`. Before: `5ffa482d…` = loader-c v2.0.0 (in this
+  repo's v2.0.0); `f3af6143…` = loader-c v1.1.1 (= v1.1.0), SPEC 3.0.0, measured 2026-10-26;
+  first copied 2026-06-19 from an unrecorded tag. On the next sync, re-stamp: the -c tag, the
+  sha256, the date.
 - `examples/adder.zig` — the runnable example (`zig build run`); loads `tests/math_50.wasm`. Its
   own `examples/math_50.*` copy (an older build, wasm bytes NOT the stamped set) was deleted
   2026-10-26 so one copy exists (★ 4.1).
@@ -113,7 +114,8 @@ Result: `zig build test` 11/11, `zig build run` the three adder lines, unchanged
 All in `src/uwl.zig`. Idiomatic Zig over the C loader's explicit `uwl_call` core (NOT the C variadic
 convenience layer). The C loader 2.0.0 does the checking (the `.wit` read first and parsed
 strictly, every import's callback, each argument's kind, each callback's return kind); the binding
-sends exact kinds, checks the result kind, and keeps the message. 118 symbols in `api-surface.txt`.
+sends exact kinds, checks the result kind, and keeps the message. 118 symbols in `api-surface.txt`
+at v2.0.0; 120 since `14d1fad` (C loader 2.1.0's `c.uwl_err`, `c.UWL_ERR`).
 
 - **`uwl.Module`** — a loaded, ABI-translated module (`handle: *c.uwl_module_t`).
 - **`Module.import(path: [:0]const u8) Error!Module`** = `importWith(path, &.{})`: a module that
@@ -121,7 +123,13 @@ sends exact kinds, checks the result kind, and keeps the message. 118 symbols in
 - **`Module.importWith(path, callbacks: []const HostCallback) Error!Module`** (new 2026-11-08) —
   wraps `uwl_import`. **`uwl.HostCallback`** = `c.uwl_host_callback_t` (name, `callconv(.c)` fn,
   userdata). Before 2026-11-08 host imports needed the raw `uwl.c` layer (and SPEC § 7.1's
-  `hostCallbacks?` parameter was missing from the Zig API).
+  `hostCallbacks?` parameter was missing from the Zig API). **A callback FAILS by returning
+  `c.uwl_err("why")`** (C loader 2.1.0, ledger C39, `d4b785f`): for every import, void ones
+  included, the trampoline traps, the WASM stops at the import, and the export's call is
+  `error.CallFailed` with `lastError()` = `host callback <name> (WIT import "<name>") failed:
+  why`. Before, a callback had no way to fail: a result import could only return a wrong kind
+  (a misleading kind error) and a VOID import's value was ignored, so the WASM ran on. No Zig
+  wrapper: the callback is a C callback, so it returns the C value directly.
 - **`m.call(comptime T, name, args) Error!T`** — `i32`/`i64`/`f32`/`f64`/`bool`/`void`. A result
   whose kind is not `T`'s (`void` ↔ UWL_VOID included) is `error.WrongResultType` with a message
   `export 'add' returned s32, not f64`. Before 2026-11-08 it read the wrong union member silently
@@ -331,5 +339,16 @@ re-checks and prints it.
   surface is not computable on Zig 0.17.1). Bumped and released 2026-11-08 (§ Release / publish
   flow); before that the version line stayed `1.0.0` (`main` was ahead of `origin` by
   the earlier unpushed `541a02e` / `7cbe498` / `e4f026a` plus this session's commits).
+- **Next version (2026-11-08): MINOR, 2.1.0 decided, NOT bumped or pushed** — floor vs `v2.0.0` is
+  minor (`added: const c.UWL_ERR`, `added: fn c.uwl_err`); `bump patch` refused, `bump minor
+  --dry-run` allowed. **Rule 3 ran for real for the first time:** `v2.0.0`'s own 23 tests,
+  unmodified (`git archive` of the tag), on today's src: `GREEN — 23 passed, 0 failed`. Also on
+  local `main`: the no-`gh` scripts (`1f9ff65`, H30). Bump, push and release are the owner's.
+- **25 tests since `d4b785f`**: two for `uwl_err` — a failing result import (`envAdd` on
+  `imports_50`: its own message, not a kind complaint; a NULL message → `(no message)`; `scale`
+  still works), and a failing VOID import in a hand-assembled 61-byte module (`run` calls `ping`
+  then `after`; with `ping` failing, `after` never runs; the control run shows it does).
+  Inverted: the trampoline's `UWL_ERR` check disabled → exactly those two red (`23 passed; 0
+  skipped; 2 failed.`); the void one returned normally, the defect C39 describes.
 - **Vendored header drift:** `src/universal_wasm_loader.h` is a manual copy of upstream
   `universalWasmLoader-c`; there is no automated sync — bump it deliberately per targeted release.
