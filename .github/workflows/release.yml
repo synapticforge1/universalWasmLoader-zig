@@ -1,0 +1,138 @@
+name: release
+
+# A pushed vX.Y.Z tag IS the release (the Zig package manager and Zigistry resolve the tag's
+# source tarball). This workflow gates the tag and then makes its GitHub Release page — by CI,
+# never by hand and never with the GitHub CLI (workspace letters H30, H32; owner, 2026-11-09:
+# "they both need the CI and release pages, not by hand"). Only tags pushed after this workflow
+# landed get a page (owner: "only new tags will get release pages"), so there is no dispatch.
+#
+# Two jobs, on purpose (workspace C30):
+# - `checks` runs everything that executes code (Zig, the wasmtime SDK, Bun, the test suites, the
+#   compatibility gate) with a read-only token; the clone is tokenless.
+# - `release` is the only job with `contents: write`. It checks out nothing: it fetches the single
+#   file scripts/github-release.ts at the tagged commit and runs it with the pinned Bun. The
+#   script refuses unless the tag exists on GitHub and peels to the commit `checks` passed
+#   (POST /releases would otherwise CREATE a missing tag), treats an existing page as done, and
+#   reads the page back.
+#
+# No `uses:` steps: Bun, Zig and the wasmtime C API SDK come from their official downloads,
+# pinned by version AND sha256. Move a pin by changing both together (Bun: the release's
+# SHASUMS256.txt; Zig: https://ziglang.org/download/index.json; wasmtime: measure the zip).
+# Bun is the latest installed Bun (workspace Tooling rule 10, letter H31).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.ref_name }}
+  BUN_VERSION: 1.4.4
+  BUN_SHA256_WINDOWS: cd2c0fccc78f3ede1f50ca827a15f063eda13d4d150a3d0674f4f6e323d864a5
+  BUN_SHA256_LINUX: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+  ZIG_VERSION: 0.17.1
+  ZIG_SHA256_WINDOWS: b03f477a1943673e02aca0f570e8030dffd536ce1f45cbc4d3326ec31159562e
+  WASMTIME_SHA256: 233ac3d1e961c0b8b7e1726059ed93639c2dcff57732424afe90a809a19f7c26
+
+jobs:
+  checks:
+    # build.zig knows one wasmtime SDK, x86_64-mingw: the suite runs on Windows.
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Clone the tag (full history and tags for the gate; no token)
+        run: |
+          set -euo pipefail
+          git clone --branch "$TAG" "https://github.com/${{ github.repository }}" .
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}" \
+            || { echo "::error::tag $TAG no longer points at ${{ github.sha }}"; exit 1; }
+          version="$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' build.zig.zon)"
+          test "v$version" = "$TAG" \
+            || { echo "::error::build.zig.zon says $version, the tag is $TAG"; exit 1; }
+
+      - name: Install Bun and Zig (pinned by sha256)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Get-Pinned($url, $sha, $out) {
+            for ($i = 1; $i -le 5; $i++) {
+              try { Invoke-WebRequest -Uri $url -OutFile $out; break }
+              catch { if ($i -eq 5) { throw }; Start-Sleep -Seconds 5 }
+            }
+            $got = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
+            if ($got -ne $sha) { throw "SHA256 MISMATCH for ${url}: expected $sha, got $got" }
+          }
+          $tools = Join-Path $env:RUNNER_TEMP 'tools'
+          Get-Pinned "https://github.com/oven-sh/bun/releases/download/bun-v$env:BUN_VERSION/bun-windows-x64.zip" $env:BUN_SHA256_WINDOWS "$env:RUNNER_TEMP\bun.zip"
+          Expand-Archive "$env:RUNNER_TEMP\bun.zip" $tools
+          Get-Pinned "https://ziglang.org/download/$env:ZIG_VERSION/zig-x86_64-windows-$env:ZIG_VERSION.zip" $env:ZIG_SHA256_WINDOWS "$env:RUNNER_TEMP\zig.zip"
+          Expand-Archive "$env:RUNNER_TEMP\zig.zip" $tools
+          Add-Content $env:GITHUB_PATH (Join-Path $tools 'bun-windows-x64')
+          Add-Content $env:GITHUB_PATH (Join-Path $tools "zig-x86_64-windows-$env:ZIG_VERSION")
+
+      - name: Versions
+        run: bun --version && zig version
+
+      - name: Fetch the wasmtime C API SDK (pinned by sha256)
+        run: bun scripts/fetch-wasmtime.ts
+
+      # The regression gate (cmem/INDEX.md): the reference suite, the example, the surface snapshot.
+      - name: zig build test
+        run: |
+          set -o pipefail
+          zig build test 2>&1 | tee test.log
+          grep -E '^All [0-9]+ tests passed\.$' test.log
+
+      - name: zig build run
+        run: |
+          set -o pipefail
+          zig build run 2>&1 | tee run.log
+          grep -qx 'adder(3, 4) = 7' run.log
+          grep -qx 'multiply(2.5, 4.0) = 10' run.log
+          grep -qx 'square(5) = 25' run.log
+
+      - name: API surface is current
+        run: bun scripts/surface.ts --check
+
+      - name: Release scripts' tests
+        run: bun test scripts/
+
+      # The compatibility gate (cmem/compat-gate.md): the version meets the floor vs the tag
+      # before it, and that tag's tests pass for a patch or minor.
+      - name: Compatibility gate
+        run: bun scripts/compat.ts --release
+
+  release:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # only for the Release write in scripts/github-release.ts
+    steps:
+      - name: Install Bun (pinned by sha256)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/bun.zip" \
+            "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"
+          echo "${BUN_SHA256_LINUX}  $RUNNER_TEMP/bun.zip" | sha256sum -c -
+          unzip -q -d "$RUNNER_TEMP" "$RUNNER_TEMP/bun.zip"
+          echo "$RUNNER_TEMP/bun-linux-x64" >> "$GITHUB_PATH"
+
+      - name: Fetch the release script at the tagged commit (no checkout)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/github-release.ts" \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/github-release.ts"
+
+      - name: Create the GitHub Release page (REST API)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ env.TAG }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: bun "$RUNNER_TEMP/github-release.ts"

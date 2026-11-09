@@ -6,7 +6,6 @@ import {
   exec,
   githubSlug,
   help,
-  ownerItem,
   readVersion,
   remoteCommit,
   reportDirty,
@@ -24,13 +23,12 @@ The single source of truth for the version is \`.version\` in build.zig.zon.
 This script reads it, tags the current commit \`v<version>\`, pushes the branch
 and tag to \`origin\`, and reads both back with \`git ls-remote\` (the tag must
 point at HEAD there too). Zigistry / the Zig package manager resolve the package
-by that tag's source tarball, so the tag is the release. A GitHub Release page
-is optional polish and a web-UI task: the script prints its URL as an OWNER
-ITEM (no GitHub CLI, workspace Tooling rule 9).
+by that tag's source tarball, so the tag is the release. The pushed tag starts
+.github/workflows/release.yml, which re-runs the release checks on GitHub and
+then makes the tag's GitHub Release page (workspace H32: by CI, never by hand,
+never with the GitHub CLI); the script prints where to watch it.
 
 Usage: bun scripts/release.ts [options]
-  --notes <text>   Notes to paste into the Release page (printed with its URL).
-  --no-release     Do not print the Release-page owner item.
   --no-build       Skip the cold-cache \`zig build run\` / \`zig build test\`
                    verification (the compatibility gate still runs).
   --remote <name>  Git remote to push to (default: origin).
@@ -42,8 +40,6 @@ Idempotent: if the tag already exists it is reused (must point at HEAD).
 
 process.chdir(ROOT);
 
-let notes = "";
-let makeRelease = true;
 let doBuild = true;
 let remote = "origin";
 let dryRun = false;
@@ -51,9 +47,7 @@ let dryRun = false;
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
-  if (arg === "--notes") notes = args[++i] ?? "";
-  else if (arg === "--no-release") makeRelease = false;
-  else if (arg === "--no-build") doBuild = false;
+  if (arg === "--no-build") doBuild = false;
   else if (arg === "--remote") remote = args[++i] ?? "";
   else if (arg === "--dry-run") dryRun = true;
   else if (arg === "-h" || arg === "--help") help(USAGE);
@@ -118,16 +112,14 @@ if (!dryRun) {
   if (onBranch !== head) die(`${remote}'s ${branch} is not HEAD (${head}).`);
 }
 
-if (makeRelease) {
-  const slug = githubSlug(remote);
-  const body = notes ||
-    `Release ${tag} of universalWasmLoader-zig — idiomatic Zig binding for the Universal WASM Loader.`;
-  if (slug) {
-    ownerItem(`optional Release page for ${tag} (the pushed tag is the release)`,
-      `https://github.com/${slug}/releases/new?tag=${tag}`, [`title: ${tag}`, `notes: ${body}`]);
-  } else {
-    console.log(`(${remote} is not a github.com remote; no Release page to suggest.)`);
-  }
+// --- The Release page is CI's (H32): say where to watch it ------------------
+const slug = githubSlug(remote);
+if (slug) {
+  console.log(`The tag starts the release workflow, which makes the Release page:`);
+  console.log(`  run:  https://github.com/${slug}/actions/workflows/release.yml`);
+  console.log(`  page: https://github.com/${slug}/releases/tag/${tag}`);
+} else {
+  console.log(`(${remote} is not a github.com remote; no release workflow runs there.)`);
 }
 
 console.log(`Done: ${tag}`);

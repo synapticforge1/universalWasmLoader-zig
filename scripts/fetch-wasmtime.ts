@@ -10,6 +10,11 @@
 //
 // Needs nothing but Bun: the download uses fetch() and the .zip is extracted
 // in-process (stored + deflate entries), so no curl/unzip/tar is required.
+//
+// WASMTIME_SHA256 (env, optional): the zip's expected sha256; a mismatch fails
+// before anything is extracted. CI sets it (.github/workflows/release.yml);
+// v45.0.2 x86_64-mingw = 233ac3d1e961c0b8b7e1726059ed93639c2dcff57732424afe90a809a19f7c26
+// (measured 2026-11-09, 30,586,950 bytes).
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { inflateRawSync } from "node:zlib";
@@ -29,6 +34,12 @@ if (existsSync(join(VENDOR, NAME, "include"))) {
 
 console.log(`Downloading ${URL}`);
 const zip = await download(URL, 3);
+const want = (process.env.WASMTIME_SHA256 ?? "").trim().toLowerCase();
+if (want) {
+  const got = new Bun.CryptoHasher("sha256").update(zip).digest("hex");
+  if (got !== want) die(`SHA256 MISMATCH for ${NAME}.zip: expected ${want}, got ${got}`);
+  console.log(`sha256 ok: ${got}`);
+}
 console.log("Extracting");
 extractZip(zip, VENDOR);
 console.log(`Done: ${join(VENDOR, NAME)}`);
