@@ -113,7 +113,10 @@ if (existing.status === 200) {
 if (existing.status !== 404) fail(`GET release ${tag}: HTTP ${existing.status} ${existing.text.slice(0, 200)}`);
 
 // 3. Create it, read it back, re-check the tag.
-const body = { tag_name: tag, name: tag, generate_release_notes: true, draft: false, prerelease: false };
+// The "registry" line on top (release-process.md § 5 U7): for Zig, the tag's tarball is the
+// package; GitHub appends the generated notes after this body.
+const install = `Install: \`zig fetch --save https://github.com/${repo}/archive/refs/tags/${tag}.tar.gz\``;
+const body = { tag_name: tag, name: tag, body: install, generate_release_notes: true, draft: false, prerelease: false };
 if (dryRun) {
   console.log(`dry-run: would POST /repos/${repo}/releases (${Object.keys(body).join(", ")})`);
   process.exit(0);

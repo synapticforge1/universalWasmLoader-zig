@@ -1,23 +1,30 @@
 name: release
 
-# A pushed vX.Y.Z tag IS the release (the Zig package manager and Zigistry resolve the tag's
-# source tarball). This workflow gates the tag and then makes its GitHub Release page — by CI,
-# never by hand and never with the GitHub CLI (workspace letters H30, H32; owner, 2026-11-09:
-# "they both need the CI and release pages, not by hand"). Only tags pushed after this workflow
-# landed get a page (owner: "only new tags will get release pages"), so there is no dispatch.
-# A push to `main` runs `checks` only (compatibility gate in report mode), so the CI gate is
-# proven on GitHub before a release relies on it (loader-v's shape).
+# The release process (workspace release-process.md § 5, letter H33). 🔒 Owner, 2026-11-10: "the
+# CI to check first, then push the tag, and then create the release page from the tag, then
+# publish the package to the registry for the project in that order." So this workflow runs on
+# every push to `main`, and a release is ONE run:
 #
-# Two jobs, on purpose (workspace C30):
+#   checks (U5) → tag (U6) → release (U7, the page from the tag) → publish (U8)
+#
 # - `checks` runs everything that executes code (Zig, the wasmtime SDK, Bun, the test suites, the
-#   compatibility gate) with a read-only token; the clone is tokenless.
-# - `release` is the only job with `contents: write`. It checks out nothing: it fetches the single
-#   file scripts/github-release.ts at the tagged commit and runs it with the pinned Bun. The
-#   script refuses unless the tag exists on GitHub and peels to the commit `checks` passed
-#   (POST /releases would otherwise CREATE a missing tag), treats an existing page as done, and
-#   reads the page back.
+#   compatibility gate) with a read-only token on a tokenless clone of the pushed commit, and
+#   decides "is this a release?": build.zig.zon's version has no tag yet (or, on a re-run, its tag
+#   is already on THIS commit). It also computes the package hash `zig fetch` must find.
+# - `tag` creates the annotated tag vX.Y.Z on that commit through the REST API
+#   (scripts/github-tag.ts). A tag pushed with the job's GITHUB_TOKEN starts no new run, so the
+#   page and the publish follow here, by `needs:`.
+# - `release` makes the GitHub Release page from the tag (scripts/github-release.ts, H32's order).
+# - `publish`: Zig has no registry upload — the Zig package manager and Zigistry resolve the tag's
+#   source tarball, so the tag IS the publish (release-process.md § 6, "git-tag registries").
+#   This job is the read-back as a user (U10): `zig fetch` of the tag's tarball must give the
+#   exact package hash `checks` computed from the commit. Fatal otherwise.
 #
-# No `uses:` steps: Bun, Zig and the wasmtime C API SDK come from their official downloads,
+# The local `bun scripts/release.ts` pushes `main` only; it never makes a tag (U4). No job runs
+# the GitHub CLI (H30). The write jobs check out nothing: each fetches its one script at the
+# tested commit (C30). Re-runs are safe (U12): each job skips what is already done.
+#
+# No `uses:` steps (U9): Bun, Zig and the wasmtime C API SDK come from their official downloads,
 # pinned by version AND sha256. Move a pin by changing both together (Bun: the release's
 # SHASUMS256.txt; Zig: https://ziglang.org/download/index.json; wasmtime: measure the zip).
 # Bun is the latest installed Bun (workspace Tooling rule 10, letter H31).
@@ -26,19 +33,21 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
 
-permissions:
-  contents: read
+permissions: {}
+
+# One group per commit, never cancelled (U9): a release run is never cut short by a later push.
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
 
 env:
-  TAG: ${{ github.ref_name }}
   BUN_VERSION: 1.4.4
   BUN_SHA256_WINDOWS: cd2c0fccc78f3ede1f50ca827a15f063eda13d4d150a3d0674f4f6e323d864a5
   BUN_SHA256_LINUX: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
   ZIG_VERSION: 0.17.1
   ZIG_SHA256_WINDOWS: b03f477a1943673e02aca0f570e8030dffd536ce1f45cbc4d3326ec31159562e
+  ZIG_SHA256_LINUX: 3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
   WASMTIME_SHA256: 233ac3d1e961c0b8b7e1726059ed93639c2dcff57732424afe90a809a19f7c26
 
 jobs:
@@ -50,18 +59,37 @@ jobs:
     defaults:
       run:
         shell: bash
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      tag: ${{ steps.decide.outputs.tag }}
+      zig_hash: ${{ steps.hash.outputs.zig_hash }}
     steps:
-      - name: Clone the pushed ref (full history and tags for the gate; no token)
+      - name: Clone the pushed commit (full history and tags for the gate; no token)
         run: |
           set -euo pipefail
-          git clone --branch "$TAG" "https://github.com/${{ github.repository }}" .
-          test "$(git rev-parse HEAD)" = "${{ github.sha }}" \
-            || { echo "::error::$TAG no longer points at ${{ github.sha }}"; exit 1; }
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            version="$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' build.zig.zon)"
-            test "v$version" = "$TAG" \
-              || { echo "::error::build.zig.zon says $version, the tag is $TAG"; exit 1; }
+          git clone "https://github.com/${{ github.repository }}" .
+          git checkout --quiet --detach "${{ github.sha }}"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+
+      # "Is this a release?" (U5): the manifest's version has no tag yet. A tag already on THIS
+      # commit means a re-run of a release (U12); a tag elsewhere means the version was released
+      # before and this push is ordinary work.
+      - name: Is this a release?
+        id: decide
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' build.zig.zon)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::cannot read build.zig.zon's .version ($version)"; exit 1; }
+          tag="v$version"
+          if at="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
+            if [ "$at" = "${{ github.sha }}" ]; then release=true; why="$tag is already on this commit (a re-run)"
+            else release=false; why="$tag exists at $at: released before"; fi
+          else
+            release=true; why="$tag does not exist yet"
           fi
+          echo "release=$release ($why)"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Install Bun and Zig (pinned by sha256)
         shell: pwsh
@@ -85,6 +113,17 @@ jobs:
 
       - name: Versions
         run: bun --version && zig version
+
+      # The package hash a user's `zig fetch` must find (it covers build.zig.zon's `paths` only),
+      # computed on the clean clone before anything is built.
+      - name: Package hash of this commit
+        id: hash
+        run: |
+          set -euo pipefail
+          h="$(zig fetch . 2>/dev/null | tail -n 1 | tr -d '\r')"
+          [[ "$h" =~ ^universal_wasm_loader-[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9_-]+$ ]] || { echo "::error::zig fetch . gave '$h'"; exit 1; }
+          echo "zig_hash=$h"
+          echo "zig_hash=$h" >> "$GITHUB_OUTPUT"
 
       - name: Fetch the wasmtime C API SDK (pinned by sha256)
         run: bun scripts/fetch-wasmtime.ts
@@ -110,20 +149,48 @@ jobs:
       - name: Release scripts' tests
         run: bun test scripts/
 
-      # The compatibility gate (cmem/compat-gate.md). On a tag: the version meets the floor vs the
-      # tag before it, and that tag's tests pass for a patch or minor. On `main`: the report
-      # (floor and the last tag's tests against today's src).
+      # The compatibility gate (cmem/compat-gate.md). For a release: the version meets the floor
+      # vs the tag before it, and that tag's tests pass for a patch or minor. Otherwise: the
+      # report (floor and the last tag's tests against this src).
       - name: Compatibility gate
         run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
+          if [ "${{ steps.decide.outputs.release }}" = "true" ]; then
             bun scripts/compat.ts --release
           else
             bun scripts/compat.ts
           fi
 
-  release:
-    if: github.ref_type == 'tag'
+  tag:
     needs: checks
+    if: needs.checks.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # only for the tag write in scripts/github-tag.ts
+    steps:
+      - name: Install Bun (pinned by sha256)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/bun.zip" \
+            "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"
+          echo "${BUN_SHA256_LINUX}  $RUNNER_TEMP/bun.zip" | sha256sum -c -
+          unzip -q -d "$RUNNER_TEMP" "$RUNNER_TEMP/bun.zip"
+          echo "$RUNNER_TEMP/bun-linux-x64" >> "$GITHUB_PATH"
+
+      - name: Fetch the tag script at the tested commit (no checkout)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/github-tag.ts" \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/github-tag.ts"
+
+      - name: Create the annotated tag on the tested commit (REST API)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.checks.outputs.tag }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: bun "$RUNNER_TEMP/github-tag.ts"
+
+  release:
+    needs: [checks, tag]
     runs-on: ubuntu-latest
     permissions:
       contents: write # only for the Release write in scripts/github-release.ts
@@ -137,15 +204,48 @@ jobs:
           unzip -q -d "$RUNNER_TEMP" "$RUNNER_TEMP/bun.zip"
           echo "$RUNNER_TEMP/bun-linux-x64" >> "$GITHUB_PATH"
 
-      - name: Fetch the release script at the tagged commit (no checkout)
+      - name: Fetch the release script at the tested commit (no checkout)
         run: |
           set -euo pipefail
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/github-release.ts" \
             "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/github-release.ts"
 
-      - name: Create the GitHub Release page (REST API)
+      - name: Create the GitHub Release page from the tag (REST API)
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ env.TAG }}
+          RELEASE_TAG: ${{ needs.checks.outputs.tag }}
           RELEASE_SHA: ${{ github.sha }}
         run: bun "$RUNNER_TEMP/github-release.ts"
+
+  publish:
+    needs: [checks, release]
+    runs-on: ubuntu-latest
+    permissions: {} # reads public URLs only
+    steps:
+      - name: Install Zig (pinned by sha256)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/zig.tar.xz" \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          echo "${ZIG_SHA256_LINUX}  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      # The tag IS the publish for a Zig package; this is the read-back as a user (U8 / U10):
+      # what `zig fetch --save <tarball>` resolves must be the hash of the commit `checks` passed.
+      - name: zig fetch the tag's tarball, as a user
+        env:
+          TAG: ${{ needs.checks.outputs.tag }}
+          WANT: ${{ needs.checks.outputs.zig_hash }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          got=""
+          for i in 1 2 3 4 5; do
+            if got="$(timeout 120 zig fetch "$url" 2>/dev/null | tail -n 1)" && [ -n "$got" ]; then break; fi
+            echo "zig fetch attempt $i failed; retrying"; sleep 10
+          done
+          echo "tarball: $url"
+          echo "fetched: $got"
+          echo "checks:  $WANT"
+          test "$got" = "$WANT" || { echo "::error::zig fetch of $TAG gave '$got', the tested commit hashes to '$WANT'"; exit 1; }

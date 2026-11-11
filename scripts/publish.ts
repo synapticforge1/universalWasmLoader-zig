@@ -2,7 +2,7 @@
 // kept out of release.ts. Changes nothing: the one action, a repository topic,
 // is a GitHub web-UI task, printed as an OWNER ITEM (no GitHub CLI, workspace
 // Tooling rule 9).
-import { die, githubSlug, help, ownerItem, readVersion, remoteCommit, revParse, ROOT, statusShort, tagExists } from "./_lib.ts";
+import { capture, die, githubSlug, help, ownerItem, readVersion, remoteCommit, revParse, ROOT, statusShort, tagExists } from "./_lib.ts";
 
 const USAGE = `
 List this package on Zigistry — a SEPARATE, deliberate step, intentionally
@@ -56,7 +56,9 @@ if (!allowDirty && statusShort()) die("working tree is dirty — commit/stash, o
 
 // --- The release tag exists locally and on the remote, at one commit ---------
 if (!skipTagCheck) {
-  if (!tagExists(tag)) die(`tag ${tag} not found locally — run scripts/release.ts first (or --skip-tag-check).`);
+  // CI makes release tags (H33), so fetch them before looking.
+  capture(["git", "fetch", "--quiet", "--tags", remote]);
+  if (!tagExists(tag)) die(`tag ${tag} not found here or on ${remote} — release it first (bun scripts/release.ts; CI tags), or --skip-tag-check.`);
   const local = revParse(`${tag}^{commit}`);
   const onRemote = remoteCommit(remote, `refs/tags/${tag}`);
   if (onRemote === null) die(`tag ${tag} not on ${remote} — push it (scripts/release.ts) first (or --skip-tag-check).`);

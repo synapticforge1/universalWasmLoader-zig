@@ -94,7 +94,14 @@ test("a lightweight tag at the commit: the Release is created with generated not
   const r = await run();
   expect(r.code).toBe(0);
   expect(posts()).toHaveLength(1);
-  expect(posts()[0].body).toEqual({ tag_name: TAG, name: TAG, generate_release_notes: true, draft: false, prerelease: false });
+  expect(posts()[0].body).toEqual({
+    tag_name: TAG,
+    name: TAG,
+    body: "Install: `zig fetch --save https://github.com/" + REPO + "/archive/refs/tags/" + TAG + ".tar.gz`",
+    generate_release_notes: true,
+    draft: false,
+    prerelease: false,
+  });
   expect(r.out).toContain("created by github-actions[bot]");
 });
 

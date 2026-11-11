@@ -27,10 +27,10 @@ const USAGE = `
 Bump the project version in build.zig.zon (the single source of truth).
 
 Updates \`.version\` to the next semver, commits the one-line change, and stops
-there — tagging/pushing/releasing is scripts/release.ts's job. Typical flow:
+there — pushing is scripts/release.ts's job, and CI tags (H33). Typical flow:
 
     bun scripts/bump-version.ts minor   # 1.0.0 -> 1.1.0, commits the bump
-    bun scripts/release.ts              # tags v1.1.0, pushes, reads it back
+    bun scripts/release.ts              # pushes main; CI checks, tags v1.1.0, page, read-back
 
 Usage: bun scripts/bump-version.ts <major|minor|patch> [options]
   major|minor|patch   Increment that semver component (resets lower ones).
@@ -130,10 +130,10 @@ console.log(`+ set .version = "${next}" in ${ZON}`);
 
 if (doCommit) {
   run(["git", "add", ZON]);
-  run(["git", "commit", "-m", `Bump version: v${cur} -> v${next}`]);
+  run(["git", "commit", "-m", `bump to v${next}`]);
 }
 
 console.log(`Done: ${next}`);
 if (doCommit) {
-  console.log(`Next: bun scripts/release.ts   # tags v${next}, pushes, reads it back (ls-remote)`);
+  console.log(`Next: bun scripts/release.ts   # pushes main; CI checks, then tags v${next}, page, zig fetch`);
 }

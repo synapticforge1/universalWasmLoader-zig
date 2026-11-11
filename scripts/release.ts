@@ -1,4 +1,4 @@
-// Cut a release of universalWasmLoader-zig consistently.
+// Release universalWasmLoader-zig: guard, verify, push `main` — and NOTHING else. CI tags.
 import { rmSync } from "node:fs";
 import {
   capture,
@@ -17,25 +17,31 @@ import {
 } from "./_lib.ts";
 
 const USAGE = `
-Cut a release of universalWasmLoader-zig consistently.
+Release universalWasmLoader-zig (workspace release-process.md § 5 U4, letter H33).
 
-The single source of truth for the version is \`.version\` in build.zig.zon.
-This script reads it, tags the current commit \`v<version>\`, pushes the branch
-and tag to \`origin\`, and reads both back with \`git ls-remote\` (the tag must
-point at HEAD there too). Zigistry / the Zig package manager resolve the package
-by that tag's source tarball, so the tag is the release. The pushed tag starts
-.github/workflows/release.yml, which re-runs the release checks on GitHub and
-then makes the tag's GitHub Release page (workspace H32: by CI, never by hand,
-never with the GitHub CLI); the script prints where to watch it.
+🔒 Owner, 2026-11-10: "the CI to check first, then push the tag, and then create
+the release page from the tag, then publish". So this script makes and pushes NO
+tag. It reads the version from build.zig.zon (the single source of truth, set
+by bump-version.ts), refuses unless this is a releasable state, verifies the
+build locally, runs the compatibility gate, then pushes \`main\` (with the bump
+commit) and reads it back with \`git ls-remote\`.
+
+That push starts .github/workflows/release.yml, which in ONE run checks the
+commit, creates the tag v<version> on it, makes the GitHub Release page from the
+tag, and reads the package back with \`zig fetch\` (for Zig the tag IS the
+publish). The script prints where to watch it.
+
+Guards: a clean tree (untracked files count); on \`main\`; \`<remote>/main\`, freshly
+fetched, is an ancestor of HEAD (a fast-forward push, nothing to reconcile);
+v<version> absent locally AND on the remote (a released version is never
+re-released, a tag never moves).
 
 Usage: bun scripts/release.ts [options]
   --no-build       Skip the cold-cache \`zig build run\` / \`zig build test\`
                    verification (the compatibility gate still runs).
   --remote <name>  Git remote to push to (default: origin).
-  --dry-run        Print what would happen; make no tags or pushes.
+  --dry-run        Every guard and check; push nothing.
   -h, --help       Show this help.
-
-Idempotent: if the tag already exists it is reused (must point at HEAD).
 `;
 
 process.chdir(ROOT);
@@ -56,32 +62,33 @@ for (let i = 0; i < args.length; i++) {
 
 const run = runner(dryRun);
 
-// --- Derive version from build.zig.zon (source of truth) --------------------
+// --- Version (source of truth: build.zig.zon) --------------------------------
 const tag = `v${readVersion()}`;
 console.log(`Releasing ${tag} (from build.zig.zon)`);
 
-// --- Preflight checks -------------------------------------------------------
+// --- Guards ------------------------------------------------------------------
 if (statusShort()) {
-  console.error("error: working tree is dirty — commit or stash before releasing.");
+  console.error("error: working tree is dirty (untracked files count) — commit or remove them first.");
   reportDirty();
   process.exit(1);
 }
 
 const branch = capture(["git", "rev-parse", "--abbrev-ref", "HEAD"]).out.trim();
-console.log(`On branch: ${branch}`);
+if (branch !== "main") die(`releases go from main; HEAD is on '${branch}'. Merge into main first ("push").`);
 
-// If the tag already exists, it must point at the current commit.
-const tagIsThere = tagExists(tag);
-if (tagIsThere) {
-  if (revParse(`${tag}^{commit}`) !== revParse("HEAD")) {
-    console.error(`error: tag ${tag} exists but does not point at HEAD.`);
-    console.error("       Bump .version in build.zig.zon or move the tag deliberately.");
-    process.exit(1);
-  }
-  console.log(`tag ${tag} already exists at HEAD — reusing.`);
+if (!capture(["git", "fetch", "--quiet", remote, "main"]).ok) die(`git fetch ${remote} main failed.`);
+const remoteMain = revParse(`${remote}/main`);
+if (!remoteMain) die(`${remote}/main is unknown after the fetch.`);
+if (!capture(["git", "merge-base", "--is-ancestor", remoteMain, "HEAD"]).ok) {
+  die(`${remote}/main (${remoteMain}) is not an ancestor of HEAD — pull / merge first; a release push is a fast-forward.`);
 }
 
-// --- Verify it builds -------------------------------------------------------
+if (tagExists(tag)) die(`tag ${tag} exists locally — ${tag} is already released (or a stray tag); bump first. CI makes release tags.`);
+const onRemote = remoteCommit(remote, `refs/tags/${tag}`);
+if (onRemote !== null) die(`tag ${tag} already exists on ${remote} (at ${onRemote}) — bump first; a released version is never re-released.`);
+console.log(`guards: clean tree, on main, ${remote}/main is an ancestor, ${tag} absent here and on ${remote}`);
+
+// --- Verify it builds ----------------------------------------------------------
 if (doBuild) {
   console.log("Verifying build (cold cache)…");
   console.log("+ rm -rf .zig-cache");
@@ -90,36 +97,29 @@ if (doBuild) {
   run(["zig", "build", "test"]);
 }
 
-// --- Compatibility gate: .version vs the tag before it (Rules 1-3) ----------
+// --- Compatibility gate: .version vs the tag before it (Rules 1-3) ------------
 // Runs under --dry-run too: it changes nothing, and a release it would block
-// should be known before anything is tagged.
+// should be known before anything is pushed.
 console.log("+ bun scripts/compat.ts --release");
 exec(["bun", "scripts/compat.ts", "--release"]);
 
-// --- Tag, push, release -----------------------------------------------------
-if (!tagIsThere) run(["git", "tag", "-a", tag, "-m", `universalWasmLoader-zig ${tag}`]);
-
-run(["git", "push", remote, branch]);
-run(["git", "push", remote, tag]);
-
-// --- Read back what the remote holds (check the repo, never trust the push) --
+// --- Push main (no tag), then read it back ---------------------------------------
+run(["git", "push", remote, "main"]);
 if (!dryRun) {
   const head = revParse("HEAD");
-  const onBranch = remoteCommit(remote, `refs/heads/${branch}`);
-  const onTag = remoteCommit(remote, `refs/tags/${tag}`);
-  console.log(`+ git ls-remote ${remote}: ${branch} = ${onBranch ?? "(missing)"}, ${tag}^{} = ${onTag ?? "(missing)"}`);
-  if (onTag !== head) die(`${remote} does not hold ${tag} at HEAD (${head}).`);
-  if (onBranch !== head) die(`${remote}'s ${branch} is not HEAD (${head}).`);
+  const onMain = remoteCommit(remote, "refs/heads/main");
+  console.log(`+ git ls-remote ${remote}: main = ${onMain ?? "(missing)"}`);
+  if (onMain !== head) die(`${remote}'s main is not HEAD (${head}).`);
 }
 
-// --- The Release page is CI's (H32): say where to watch it ------------------
+// --- CI does the rest: say where to watch it ------------------------------------------
 const slug = githubSlug(remote);
 if (slug) {
-  console.log(`The tag starts the release workflow, which makes the Release page:`);
+  console.log(`The push starts the release workflow: checks → tag ${tag} → Release page → zig fetch read-back.`);
   console.log(`  run:  https://github.com/${slug}/actions/workflows/release.yml`);
-  console.log(`  page: https://github.com/${slug}/releases/tag/${tag}`);
+  console.log(`  page: https://github.com/${slug}/releases/tag/${tag}  (once the run is green)`);
 } else {
   console.log(`(${remote} is not a github.com remote; no release workflow runs there.)`);
 }
 
-console.log(`Done: ${tag}`);
+console.log(`Done: pushed main for ${tag}${dryRun ? " (dry run: nothing pushed)" : ""}`);
