@@ -1,6 +1,6 @@
 .{
     .name = .universal_wasm_loader,
-    .version = "2.1.1",
+    .version = "2.1.2",
     .minimum_zig_version = "0.17.1",
     .fingerprint = 0x13e551586ae00793,
     .paths = .{
