@@ -49,9 +49,36 @@ There is no registry upload — **CI's tag IS the publish**, and U8 is the read-
   `d42f252` (the tagged commit) → true (re-run); a new version → true. `zig fetch .` of a clean
   clone of `v2.1.1` = the published tarball's hash; the `publish` comparison passes on the real
   `v2.1.1` tarball and fails on a wrong expected hash.
-- Measured on GitHub only by the next release run (the first `tag` and `publish` jobs).
+- **Measured on GitHub 2026-11-11** by v2.1.2 (below): the first `tag` and `publish` jobs, green.
 
 ## Release History
+
+### v2.1.2 — 2026-11-11 · the first release in the owner's order (CI tags)
+
+**What changed:** no library change (header, the 120-symbol surface and the SPEC 4.0.0 behaviour
+are 2.1.1's; floor patch). The release process moved to the owner's order (workspace H33 D1):
+`release.ts` pushes `main` only and never makes a tag; one CI run checks the commit, creates the
+tag (new `scripts/github-tag.ts`), makes the Release page from it (now with a `zig fetch --save`
+line on top), then reads the package back with `zig fetch` against the tested commit's hash. The
+bump commit is named `bump to vX.Y.Z`; `publish.ts` fetches tags first. Releases are recorded in
+this file (D3). The owner's words "commit" / "push" / "release" written down (H34).
+
+**Record** (owner: "release", level asked → "patch"): "push" first — `main` `b86bb10` pushed and
+read back; its run **43043480565** ran the new workflow for the first time: `checks` green on
+every step ("Is this a release?" → no, 2.1.1 is tagged; the package hash; the gate; compat
+report), `tag` / `release` / `publish` skipped as designed. Then `bump-version.ts patch` →
+**`82aebcd`** `bump to v2.1.2` (floor patch; v2.1.1's 25 tests green on the src), `release.ts` on a
+new empty cache (adder lines, `All 25 tests passed.`, `compat --release` patch vs floor patch):
+pushed `main` only, read back `main = 82aebcd`, and **no `v2.1.2` tag existed locally or on GitHub
+after it**. The push's run **43044393688**, in the owner's order: `checks` → **`tag`** →
+**`release`** → **`publish`**, all four green. Read back through the public REST API and git:
+annotated tag **`v2.1.2`** = object `611c3b0` → **`82aebcd`** (= `main`), **tagger
+`github-actions[bot]`**, message `universalWasmLoader-zig v2.1.2`; Release `v2.1.2` by
+**`github-actions[bot]`**, not a draft, created 2026-11-11T15:08:27Z, body `Install: zig fetch
+--save …/v2.1.2.tar.gz` above the generated "Full Changelog: v2.1.1...v2.1.2". As a user: `zig
+fetch` of the tag's tarball → `universal_wasm_loader-2.1.2-kwfgarYFAgBzHdQmYK9pqQ-NxGSN8yOiDp6JBFU_k2zj`,
+equal to `zig fetch .` of a clean clone at `82aebcd` (the equality the `publish` job asserted;
+its log needs a token to read, so it was re-measured here).
 
 ### v2.1.1 — 2026-11-09 · the first CI-made Release page
 
