@@ -42,7 +42,7 @@ does not build an executable — workspace Tooling rule 1, letter H15).
   plan around `gh`, never record anything as "blocked on gh" or "`gh` absent".
 - `release.ts` and `publish.ts` are `gh`-free since 2026-11-08; the CI workflow (2026-11-09)
   calls GitHub only through `scripts/github-release.ts` (REST, `GITHUB_TOKEN`)
-  ([overview.md](overview.md) § Release / publish flow). Check: `git grep -n -w gh -- .github
+  ([release.md](release.md)). Check: `git grep -n -w gh -- .github
   scripts` finds nothing (2026-11-09).
 
 ## Release pages are made by CI (workspace letter H32)
@@ -50,9 +50,17 @@ does not build an executable — workspace Tooling rule 1, letter H15).
 - 🔒 **Every tag's GitHub Release page is made by CI, never by hand and never with `gh`** (owner,
   2026-11-09: "they both need the CI and release pages, not by hand"; "only new tags will get
   release pages" — no backfill). Here: `.github/workflows/release.yml`'s `release` job, after the
-  `checks` job, in H32's order (tag exists and peels to the checked commit → an existing page is
+  `tag` job, in H32's order (tag exists and peels to the checked commit → an existing page is
   done → POST, read back, re-check the tag). Change it under the gate and BEFORE a release, never
-  during one; it is proven only by a real tag run.
+  during one; it is proven only by a real release run.
+
+## The release order: CI checks, CI tags, the page, the publish (workspace letter H33)
+
+- 🔒 **Owner, 2026-11-10 (D1): "the CI to check first, then push the tag, and then create the
+  release page from the tag, then publish the package to the registry for the project in that
+  order."** No tag is ever made or pushed from the owner's machine: `release.ts` pushes `main`
+  only; CI's `checks` → `tag` → `release` → `publish` run in ONE run on that push. Recorded slot by
+  slot (U1–U12) in [release.md](release.md), where every release is recorded, newest first (D3).
 
 ## Bun versions (workspace Tooling rule 10, letter H31)
 
@@ -63,3 +71,22 @@ does not build an executable — workspace Tooling rule 1, letter H15).
   together at the session after the owner installs a newer Bun. A DATED test result keeps its
   Bun until that test is re-run. Before 2026-11-09 this repo wrote no Bun version at all (H31's
   survey).
+
+## Owner commands: "commit", "push", "release" (owner, 2026-11-10)
+
+🔒 Written into every project by the workspace session on the owner's direction (2026-11-10:
+"please write that into each project"; workspace `cmem/working-rules.md` Tooling rule 12, letter
+H34). When the owner says:
+
+- **"commit"** — first run "update the project memory files" (re-derive this repo's `cmem/` from
+  its current state), then commit to the branch being worked on. Nothing is pushed.
+- **"push"** — perform "commit", then merge the branch into `main`, then push `main` (and the
+  working branch) to GitHub (`origin`) and read it back with `git ls-remote`.
+- **"release"** — perform "push", then the release process: the workspace's
+  `cmem/release-process.md` §§ 5–8 — CI checks first, then CI pushes the tag, then the GitHub
+  Release page from the tag, then the publish to the registry — recorded in `cmem/release.md`
+  § "Release History" (newest first, a summary of what changed). The level (patch / minor /
+  major) is the owner's: ask if it was not given.
+
+Each command includes the one before it, and none goes further than its own word (a "commit"
+never pushes, a "push" never releases). This repo's own gate and merge rules apply at each step.

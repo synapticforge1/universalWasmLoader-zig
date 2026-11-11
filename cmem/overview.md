@@ -14,8 +14,8 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
   the WASM engine. See "Zig 0.17.1 port" below for what moved.
 - **What it gives Zig callers:** error unions instead of out-params, native Zig argument/result types,
   and a **comptime-typed call site** (`m.call(i32, "add", .{3,4})`) — no manual `uwl_val_t` boxing.
-- **Distribution:** a Zig module (`build.zig.zon` name `universal_wasm_loader`, v2.1.0 since
-  2026-11-09 (v2.0.0 2026-11-08, v1.0.0 before), MIT) exposing
+- **Distribution:** a Zig module (`build.zig.zon` name `universal_wasm_loader`, MIT; the
+  current version is `build.zig.zon` `.version`, every release in [release.md](release.md)) exposing
   the importable module `uwl` (`b.addModule("uwl", ...)`). The MIT `LICENSE` file is listed in the
   manifest `paths`, so it ships with the published package.
 
@@ -33,10 +33,10 @@ live **once** in the C loader; this repo only adds a Zig-native call surface on 
   `git remote set-url origin <new url>`.
 - **Release scripts are owner-agnostic** — `release`/`publish` use `origin` (its URL gives the
   `owner/repo` for printed GitHub links), so nothing in them hard-codes the owner. No `gh` since
-  2026-11-08 (§ Release / publish flow). The Zigistry `zig-package` topic/listing
+  2026-11-08 ([release.md](release.md)). The Zigistry `zig-package` topic/listing
   follows the repo to its new owner path.
 
-## Current state — v2.1.0 (2026-11-09: + C loader 2.1.0's `uwl_err`; v2.0.0 2026-11-08: SPEC 4.0.0, Zig 0.17.1; v1 implemented 2026-06-19)
+## Current state (SPEC 4.0.0, Zig 0.17.1; the released versions are in [release.md](release.md))
 
 Working tree:
 
@@ -233,145 +233,20 @@ after the call (until 2026-11-08 the copies leaked, one per string argument per 
   system config now covers the workspace folder (ledger C9; a clone worked without it the same day).
   PowerShell 5.1's `Get-FileHash` fails on those long paths; compare trees with a Bun script instead.
 
-## Release / publish flow (AUTHORED 2026-06-19)
+## Release / publish flow
 
-The version in `build.zig.zon` (`.version`) is the **single source of truth**. Three scripts, run in
-order, keep the git tag, GitHub release, and Zigistry listing consistent with it. All are Bun +
-TypeScript (`bun scripts/<name>.ts`, cross-platform; since 2026-10-21 — they replaced the 2026-06-19
-Bash `.sh` + Nushell `.nu` pairs). `-h`/`--help` prints each one's usage.
-
-1. **`scripts/bump-version.ts <major|minor|patch>`** — rewrites `.version` in `build.zig.zon`
-   and commits the isolated bump. The explicit `X.Y.Z` form was removed 2026-10-26 (workspace
-   versioning rule: bump scripts take patch | minor | major and refuse anything else). Guards: clean
-   tree, strictly-greater target, no pre-existing tag, and (since 2026-10-26) the **compatibility gate** — fresh `api-surface.txt`, a
-   bump not below the floor vs the last tag, the last tag's tests green for a patch/minor
-   ([compat-gate.md](compat-gate.md)). `--dry-run` / `--no-commit`.
-2. **`scripts/release.ts`** — reads `.version`, verifies a clean tree + cold-cache `zig build run`
-   and `zig build test`, runs `compat.ts --release` (since 2026-10-26), tags `v<version>`, pushes
-   branch + tag to `origin`, then **reads both back with `git ls-remote`** and refuses (exit 1)
-   unless the branch and the tag's peeled commit are HEAD. It then prints where to watch the
-   release workflow and the Release page CI makes (item 4); until 2026-11-09 it printed the page as
-   an owner item (`--notes` / `--no-release` are gone with that). Idempotent (reuses a tag only if
-   it points at HEAD). Does **not** touch Zigistry. `--dry-run` / `--no-build` / `--remote`.
-4. **`.github/workflows/release.yml`** (2026-11-09, workspace H32; owner: "they both need the CI
-   and release pages, not by hand") — on a pushed `v*` tag; a push to `main` runs `checks` only,
-   with `compat.ts` in report mode and no version-vs-tag check, so the CI gate is proven on GitHub
-   before a release relies on it (loader-v's shape; the `release` job has `if: github.ref_type ==
-   'tag'`). Job **`checks`** (`windows-latest`,
-   because `build.zig` knows only the `x86_64-mingw` SDK; `contents: read`; tokenless clone of the
-   tag, which must be `github.sha` and equal `v` + `build.zig.zon`'s `.version`): installs Bun
-   1.4.4 and Zig 0.17.1 from their official zips and the wasmtime SDK through
-   `fetch-wasmtime.ts`, **each pinned by sha256**, with no `uses:` steps; then `zig build test`
-   (output must say `All N tests passed.`), `zig build run` (the three adder lines, exact),
-   `surface.ts --check`, `bun test scripts/`, `compat.ts --release`. Job **`release`**
-   (`ubuntu-latest`, `needs: checks`, the ONLY `contents: write`): installs the pinned Bun, fetches
-   the single file `scripts/github-release.ts` at `github.sha` from raw.githubusercontent.com (no
-   checkout, so no package code beside the write token, C30), and runs it. **`github-release.ts`**
-   (H32's order): the tag must exist on GitHub and peel (annotated followed) to the checked commit,
-   because `POST /releases` CREATES a missing tag; an existing Release = done, no write; else
-   `POST` with `generate_release_notes`, read back (published, not a draft), re-check the tag. Every
-   call has its own time limit (`RELEASE_TIMEOUT_MS`, default 30 s). No dispatch / backfill: only
-   tags pushed after the workflow landed get a page (owner: "only new tags will get release
-   pages"). **Tests:** `scripts/github-release.test.ts`, 13 cases against a `Bun.serve` mock that
-   records every request, so each refusal is also shown to write nothing. Inverted: tag-commit
-   check removed → its 2 tests red; existing-Release check removed → 1; time limit removed → 1;
-   post-write tag re-check removed → 1; missing-tag refusal removed → 1. (A first harness used
-   `Bun.spawnSync`, which blocked the mock in the same process: everything timed out — a harness
-   fault, now `Bun.spawn`.) The pins, measured 2026-11-09: Bun `bun-windows-x64.zip` `cd2c0fcc…`
-   and `bun-linux-x64.zip` `bf8ccbfb…` (Bun's `SHASUMS256.txt`; the Linux one = loader-go's pin);
-   Zig `b03f477a…` (ziglang.org's `index.json` = scoop's manifest); wasmtime 45.0.2 x86_64-mingw
-   `233ac3d1…` (measured; `fetch-wasmtime.ts` now checks `WASMTIME_SHA256` when set, a wrong
-   value refuses before extracting). Locally run: every `checks` shell line (version parse, the two
-   output greps) and the PowerShell download function (right sha → Bun 1.4.4 runs; wrong → refused).
-   **MEASURED on GitHub 2026-11-09:** `main` push run 42654594017 (`checks` green), tag `v2.1.1`
-   run 42655501506 (both jobs green); the page's `author.login` = `github-actions[bot]` (record
-   under "v2.1.1" below).
-3. **`scripts/publish.ts`** — the deliberate Zigistry step, decoupled from `release.ts`, and it
-   **changes nothing**. **Zigistry has no upload/CLI publish** ([help](https://zigistry.dev/help/)):
-   a library is indexed by giving the GitHub repo the topic **`zig-package`** (a program would use
-   `Zig`), after which it (re)indexes on the next push, typically within a day. The script checks
-   the `v<version>` tag locally and on `origin` (`ls-remote`, same commit), reads the repo's topics
-   from GitHub's public REST API (unauthenticated GET, read-only; "unknown" is never read as
-   "set"), exits 0 with "nothing to do" when the topic is there, and otherwise prints the web-UI
-   step as an **OWNER ITEM**. `--allow-dirty` / `--skip-tag-check` / `--remote` / `--topic`.
-
-**No `gh` (owner, 2026-11-08; workspace letter H30, Tooling rule 9).** Until 2026-11-08
-`release.ts` created the GitHub Release with `gh release create` and `publish.ts` refused to run
-without an authenticated `gh` and added the topic with `gh repo edit`. Both now check the repo
-instead (`git ls-remote`, the public API), and print what only the web UI can do as an owner
-item. Rehearsed in a scratch clone pushing to a scratch bare remote (GitHub untouched,
-`ls-remote` re-read after): a real `release.ts` for a scratch 2.0.1 pushed, read back `main` =
-`v2.0.1^{}` = HEAD, exit 0 (its gate ran v2.0.0's 23 tests on the current src: green); with the
-tag push removed (mutant) it refused, `v2.0.2^{} = (missing)`, exit 1; `--dry-run` against a
-github.com remote printed the `releases/new?tag=` owner item. `publish.ts` on the real repo:
-tag `v2.0.0` = `c647164` here and on `origin`; GitHub's API: topics **none** → the owner item;
-an unknown remote → exit 1.
-
-**v1.0.0 status (re-verified 2026-10-21 against `origin`):** `v1.0.0` is an **annotated** tag — tag
-object `89a6d97`, pointing at **commit `07d954a`** ("Add scripts/bump-version.sh"). (Earlier memory
-called `89a6d97` the tagged commit; that hash is the tag object. Resolve with
-`git rev-parse 'v1.0.0^{commit}'`.) So the tagged tree is the working library + LICENSE + cmem plus
-`fetch-wasmtime.sh`, `bump-version.sh` and `release.sh` — but not `publish.sh` or the `.nu` ports.
-`main` has advanced past it (`985cb5e` on `origin` before the 2026-10-21 commit) with `publish` and
-the Nushell forms. The tag was intentionally **not** moved: scripts/cmem aren't part of the published
-package surface, so `v1.0.0` still marks the library state. The **GitHub Release** and the **Zigistry
-topic** are owner items (web UI). Zigistry needs only the topic + a push; the GitHub Release is
-optional polish.
-
-**v2.0.0 (2026-11-08, owner: "update the project memory files, commit, bump, then release and
-push"):** the first release through the compatibility gate. `bump-version.ts major` (floor major:
-SPEC 3.0.0 → 4.0.0, and v1.0.0's surface is not computable on Zig 0.17.1), then `release.ts`
-with `ZIG_LOCAL_CACHE_DIR` pointed at a NEW empty directory, so its "cold-cache" build really is
-cold (it only deletes the repo's own `.zig-cache`, which an NTFS cache dir bypasses). The
-Release page and the Zigistry topic are owner items (web UI). **Released 2026-11-08:** bump `c647164` (its
-message is the script's, without the co-author line); `release.ts` exit 0 — cold build on a new
-cache dir: the three adder lines, `All 23 tests passed.`, `compat --release` major step vs floor
-major. Annotated tag **`v2.0.0`** = object `932b94c` → commit **`c647164`**. Read back with
-`git ls-remote origin`: `refs/heads/main` = `refs/tags/v2.0.0^{}` = `c647164`; `origin/main`'s
-`build.zig.zon` says `2.0.0`; the tag's source tarball answers HTTP 200, and `zig fetch` of it
-(Zig 0.17.1) gives the package hash
-`universal_wasm_loader-2.0.0-kwfgauDsAQB_yLRu7NqzpGuKdXu9FRj8mTy91DtmyO_g`. **Owner items
-(web UI), open:** the optional Release page
-(`https://github.com/synapticforge1/universalWasmLoader-zig/releases/new?tag=v2.0.0`), and the
-`zig-package` topic (GitHub's API, 2026-11-08: no topics set) — `bun scripts/publish.ts`
-re-checks and prints it.
-
-**v2.1.0 (2026-11-09, owner: "update the project memory files, commit, bump, push and release"):**
-memory `1026798`; `bump-version.ts minor` → `fdffe9f` (gate: floor minor, `added: const
-c.UWL_ERR`, `added: fn c.uwl_err`; v2.0.0's 23 tests green on the new src); then `4a198dc` fixed
-`bump-version.ts`'s help and "Next:" line, which still said `release.ts` creates the GitHub
-Release. `release.ts` on a NEW empty cache dir, exit 0: the three adder lines, `All 25 tests
-passed.`, `compat --release` minor step vs floor minor, previous-tag tests GREEN 23 / 0. Annotated
-tag **`v2.1.0`** = object `93267f5` → commit **`4a198dc`**. The first release through the
-H30 `release.ts`: its own read-back printed `main = v2.1.0^{} = 4a198dc`. Re-read after: `git
-ls-remote` gives the same; `origin/main`'s `build.zig.zon` says `2.1.0`; `git grep -w gh
-origin/main -- scripts` → nothing; the tag's tarball answers HTTP 200; `zig fetch` (Zig 0.17.1)
-gives `universal_wasm_loader-2.1.0-kwfgarYFAgA-W5Whn_YYPHuk_A3ZJHl-G8DT_JyzNZlr`. **Owner items
-(web UI), open:** ~~the optional Release pages for `v2.0.0` and `v2.1.0`~~ (2026-11-09: no
-backfill, owner H32 — old tags keep no page), and the `zig-package` topic.
-
-**v2.1.1 (2026-11-09, owner: "update the project memory files, commit, push then release") — the
-first release whose Release page CI made.** Memory `8c3bb37` pushed first; its `main` push ran
-the new workflow's `checks` on GitHub for the first time, run **42654594017**: every step
-success (pinned installs, `zig build test`, the adder lines, surface, `bun test scripts/`, compat
-report), `release` skipped as designed (a branch push). Only then: `bump-version.ts patch` →
-**`d42f252`** (floor patch; v2.1.0's 25 tests green), `release.ts` on a new empty cache (adder
-lines, `All 25 tests passed.`, `compat --release` patch vs floor patch), annotated tag
-**`v2.1.1`** = object `b1708f7` → `d42f252`; its read-back printed `main = v2.1.1^{} = d42f252`.
-The tag's run **42655501506**: `checks` success, **`release` success** (pinned Bun, the script
-fetched at the tagged commit, the page created). Read back through the public REST API: Release
-`v2.1.1`, **`author.login` = `github-actions[bot]`**, not a draft, not a prerelease, created
-2026-11-09T16:31:15Z, generated notes ("Full Changelog: v2.1.0...v2.1.1"); the tag unmoved
-(`ls-remote`: `v2.1.1^{}` = `d42f252`). The tarball answers HTTP 200; `zig fetch` (Zig 0.17.1)
-→ `universal_wasm_loader-2.1.1-kwfgarYFAgCdmh3zo0DyL2M5Sy5kqj4oENLGIs_e7xRG`. Runs were read with a
-one-time Bun poller over `GET /repos/…/actions/runs?head_sha=…` (no GitHub CLI); a branch push
-and a tag push of one commit give two runs with one `head_sha`, told apart by `head_branch` (the
-tag name for a tag push).
+**Moved to [release.md](release.md) on 2026-11-11** (workspace H33 D3: one place per project):
+the release process slot by slot (U1–U12, CI checks → CI tag → page → `zig fetch` read-back) and
+§ "Release History", newest first. The scripts: `bump-version.ts` (U3), `release.ts` (U4, pushes
+`main` only), `publish.ts` (the Zigistry topic check, an owner item); the workflow
+`.github/workflows/release.yml` with `scripts/github-tag.ts` and `scripts/github-release.ts`.
+The GitHub CLI is never used (H30, [working-rules.md](working-rules.md)).
 
 ## Known gaps / not yet done
 
-- **No CI.** `zig build test` (since 2026-10-26) runs by hand only; nothing runs it on push or tag.
-  Windows (`x86_64-mingw` SDK) is the only platform `build.zig` knows.
+- ~~No CI~~ — since 2026-11-09 `.github/workflows/release.yml` runs the regression gate on every push
+  to `main` and releases from it ([release.md](release.md)). Windows (`x86_64-mingw` SDK) is still
+  the only platform `build.zig` knows, so `checks` runs on `windows-latest`.
 - **Filesystem caveat (documented in README):** on some non-NTFS volumes ("do not record ownership"),
   Zig's build runner fails a **warm-cache** build with a bare `error: Unexpected`. Workaround:
   `rm -rf .zig-cache` before building (cold-cache is reliable), or build on an NTFS volume. Reproduced
@@ -402,25 +277,8 @@ tag name for a tag push).
   `f64` narrowed to f32 → ONLY the f32 test red (no earlier test saw that); `i64.add` → `i64.sub`
   in the module → the s64 test red (`expected 11, found -1`). If the binding ever learns the WIT
   kinds, those refusal checks fail by design: update them with the README. 23 tests.
-- **Version decision for SPEC 4.0.0 (2026-11-08): MAJOR, 2.0.0, agreed by the owner** ("I agree
-  that next version would be 2.0.0") — the gate's floor vs `v1.0.0` is major (and v1.0.0's
-  surface is not computable on Zig 0.17.1). Bumped and released 2026-11-08 (§ Release / publish
-  flow); before that the version line stayed `1.0.0` (`main` was ahead of `origin` by
-  the earlier unpushed `541a02e` / `7cbe498` / `e4f026a` plus this session's commits).
-- **Version 2.1.0 (decided 2026-11-08, released 2026-11-09 on the owner's "update the project
-  memory files, commit, bump, push and release"; § Release / publish flow)** — floor vs `v2.0.0` is
-  minor (`added: const c.UWL_ERR`, `added: fn c.uwl_err`); `bump patch` refused, `bump minor
-  --dry-run` allowed. **Rule 3 ran for real for the first time:** `v2.0.0`'s own 23 tests,
-  unmodified (`git archive` of the tag), on today's src: `GREEN — 23 passed, 0 failed`. Also on
-  the same release: the no-`gh` scripts (`1f9ff65`, H30), so 2.1.0 is the first release cut by
-  the `ls-remote`-checking `release.ts`.
-- **Version 2.1.1 (2026-11-09, owner: "update the project memory files, commit, push then
-  release")** — PATCH: the library is unchanged (header = loader-c 2.1.1 = 2.1.0, surface 120
-  symbols, floor vs `v2.1.0` patch, v2.1.0's 25 tests green on the src); what it carries is the
-  CI release workflow (H32), the Bun 1.4.4 pins (H31) and the wasmtime sha256 check. Order: push
-  `main` first and read its `checks` run on GitHub BEFORE tagging (the gate proven before a
-  release relies on it), then bump and release; the tag's run makes the first CI-made Release
-  page. The record is in § Release / publish flow.
+- **Versions and their records** (2.0.0, 2.1.0, 2.1.1 …): [release.md](release.md) § "Release History"
+  (moved 2026-11-11, H33 D3).
 - **25 tests since `d4b785f`**: two for `uwl_err` — a failing result import (`envAdd` on
   `imports_50`: its own message, not a kind complaint; a NULL message → `(no message)`; `scale`
   still works), and a failing VOID import in a hand-assembled 61-byte module (`run` calls `ping`

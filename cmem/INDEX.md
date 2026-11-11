@@ -50,6 +50,7 @@ here is filed in `../../../cmem/divergences.md` with a class, in the same sessio
 | File | What it holds |
 | --- | --- |
 | [compat-gate.md](compat-gate.md) | The compatibility gate: surface by reflection → `api-surface.txt` (C namespace keyed `c.`), the floor (a tag's committed snapshot first; unbuildable → major), previous-tag tests; its inversion |
-| [working-rules.md](working-rules.md) | Repo-local rules over the workspace floor: privacy (path test, binary scans, the maintainer-email exception); no `gh` (H30); Release pages by CI (H32); Bun version = latest installed (H31) |
+| [working-rules.md](working-rules.md) | Repo-local rules over the workspace floor: privacy (path test, binary scans, the maintainer-email exception); no `gh` (H30); Release pages by CI (H32); the release order, CI tags (H33); Bun version = latest installed (H31); the owner's "commit" / "push" / "release" (H34) |
 | [best-practices.md](best-practices.md) | Method: this repo's § L rules (L1–L3) + the workspace's 28 ★ rules, copied verbatim under a dated stamp |
+| [release.md](release.md) | The release process slot by slot (U1–U12: `release.ts` pushes `main`, CI checks → tags → page → `zig fetch` read-back) and § "Release History", newest first, a summary per version |
 | [overview.md](overview.md) | What the port is (SPEC 4.0.0, Zig 0.17.1), hosting, API surface, linking, the vendored header's provenance (= loader-c 2.1.0 / 2.1.1), build/run/test, release flow (CI release workflow since 2026-11-09), versions, known gaps |
